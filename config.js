@@ -7,6 +7,5 @@ window.CHORE_JAR_CONFIG = {
   venmo: 'mike-shai',
   cashapp: 'mikeshai',
   paypal: 'mikeshai',   // paypal.me username
-  contactEmail: '',  // optional: shown as a fallback if the feedback form can't send
-  timerShortcut: ''  // optional: an iCloud link to a shared "Paper Pig Timer" shortcut, so iPhones add it in one tap
+  contactEmail: ''   // optional: shown as a fallback if the feedback form can't send
 };
