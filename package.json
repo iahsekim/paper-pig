@@ -1,0 +1,8 @@
+{
+  "name": "paper-pig",
+  "private": true,
+  "description": "Paper Pig: the site has no build step. This file only lists what the Netlify functions need.",
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

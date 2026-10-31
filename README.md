@@ -61,7 +61,18 @@ Feedback (Settings → Contact & feedback, the chat button, or Feedback on the s
 
 That's it. Visit the site, sign in with your email, and set up your family.
 
-### 5. Optional: get an email and a sheet row when someone joins
+### 5. Timer alerts (ring with the app closed)
+
+This uses the same secret as step 6, so set that up too (or at least its secret, Vault entry and `JOINED_HOOK_SECRET`).
+
+1. **Supabase → Integrations → Cron**: turn it on. (Database → Extensions: `pg_net` should be on too.)
+2. Visit `https://<your site>/.netlify/functions/ring?new-keys`. Copy the two values into **Netlify → Environment variables** (scope: Functions): `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`. Keep the private one secret. Redeploy.
+3. **Supabase → SQL Editor:** run `schema.sql` again. It adds the device table and checks for finished timers every 5 seconds.
+4. Visit `/.netlify/functions/ring`: it should say `"ready":true`. Then on a phone, Settings → **Timer alerts**.
+
+Check it's running: `select * from cron.job_run_details where command like '%pp_ring_due%' order by start_time desc limit 5;` If you change the site's address, change `paperpig.app` in `pp_ring_due` in `schema.sql`.
+
+### 6. Optional: get an email and a sheet row when someone joins
 
 1. Make up a long random secret (one is enough for everything below).
 2. **Google Sheet:** make a sheet, then **Extensions → Apps Script**, paste [`tools/members-sheet.gs`](tools/members-sheet.gs), Save. **Project Settings → Script properties → Add**: `SECRET` = your secret. **Deploy → New deployment → Web app**, Execute as **Me**, Who has access **Anyone** → Deploy → copy the Web app URL.
@@ -90,7 +101,8 @@ That's it. Visit the site, sign in with your email, and set up your family.
 | Totals per kid | Bank balance, this week, this month, lifetime earned, withdrawn, and spent. Each entry shows the running balance, like a bank statement. |
 | Reading | The kid starts a timer and types the book, and can pause and resume it. Time is kept to the second, so 10:40 + 10:20 = 21 minutes, and each full minute adds a screen minute that week, up to the kid's limit. A forgotten timer stops itself. Parents can add reading by hand. |
 | Screen time | Base minutes plus reading minutes, used on the kid's screen days. The clock counts down the week's time to the second and can be paused. It stops itself at zero. Parents can add screen time used by hand (it counts this week). Time is only taken away through the optional jar. Base minutes, screen days and reading limit are in **Settings → Screen time**. |
-| Timers | Reading and screens can each run as a **stopwatch** or a **timer**. Timers come in 5-minute steps; for screens, never more than what's left, plus that exact amount (22 min left offers 5, 10, 15, 20, 22). At zero the session stops at exactly that length, so exactly that much is used, and an alarm rings until it's turned off. Each kid's last choice is remembered. The app needs to be open for the alarm to ring; the screen stays awake while a timer runs. |
+| Timers | Reading and screens can each run as a **stopwatch** or a **timer**. Timers come in 5-minute steps; for screens, never more than what's left, plus that exact amount (22 min left offers 5, 10, 15, 20, 22). At zero the session stops at exactly that length, so exactly that much is used, and an alarm rings until it's turned off. Each kid's last choice is remembered. While the app is open, the screen stays awake and the alarm rings in the app. With **Timer alerts** on (below), the device also rings when the app is closed or the screen is locked. |
+| Timer alerts | **Settings → Timer alerts**, or **Ring even when the app is closed** under a timer's minutes, turns it on for that phone, tablet or computer. When any kid's timer runs out, every device that turned it on gets a "Time's up!" notification with its own notification sound, within a few seconds, even with the app closed or the screen locked. iPhone and iPad need the home-screen app (iOS 16.4 or later); silent mode and Do Not Disturb mute it, like any notification. Coming back to the app afterwards shows the alarm card without ringing again. Setup: below. |
 | Get the app | Not in any app store: it installs from the browser. iPhone/iPad: Safari → Share → **Add to Home Screen**. Android: Chrome menu → **Install app**. Computers: Chrome/Edge install icon in the address bar. **Get the app** (sign-in screen, Who's here, Settings) shows the steps for the device, or installs in one tap where the browser allows it. `sw.js` lets it open without a connection. |
 | Tour | Right after setup, a guided tour highlights the parent dashboard (kid card, quick actions, savings, Jobs, Ledger, Settings), has the parent tap **Switch** and open a kid, then walks through the kid's side (bank, jobs, reading, screens, savings, ledger). Skip any time; **Settings → Take the tour again** replays it. |
 | Parent PIN | Kids share the parent's sign-in, so parent tools sit behind a 4-digit PIN. After signing in fresh with the email code, a parent can reset a forgotten PIN. |
@@ -110,7 +122,8 @@ config.js             your Supabase URL/key, app name, Venmo + Cash App handles
 privacy.html          privacy page
 supabase/schema.sql   database tables, security rules and functions
 netlify.toml          Netlify settings and security headers
-netlify/functions/    invite.js (invite emails), joined.js (new member alerts)
+netlify/functions/    invite.js (invite emails), joined.js (new member alerts), feedback.js, ring.js (timer alerts)
+package.json          the one thing the functions need: web-push (Netlify installs it)
 tools/members-sheet.gs  Apps Script for the members Google Sheet
 ```
 

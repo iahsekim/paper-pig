@@ -1324,6 +1324,9 @@ function pSettings() {
       <div class="field"><label class="label" for="invEmail">Add a parent or guardian</label><input id="invEmail" type="email" placeholder="Email address"></div>
       <button class="pill" id="invGo" type="button" style="justify-self:start">Send invite</button>
       <p class="hint">We email them a link. They sign in with that email and join your family. Anyone you add can add or remove others too.</p></section>
+    ${pushOK() && pushKey !== '' ? `<section class="card"><div class="togline"><span><span class="label">Timer alerts</span><b>Ring on this ${({ Android: 'phone', Computer: 'computer' })[devName()] || devName()} with the app closed</b></span><button class="tog" id="pushTog" type="button" aria-pressed="${pushOn()}" aria-label="Timer alerts on this device"></button></div>
+      <p class="hint">When any kid’s reading or screen timer ends, this device plays its notification sound, even if ${esc(APP)} is closed or the screen is locked. Turn it on for each phone or tablet that should ring. Silent mode and Do Not Disturb mute it.</p></section>`
+      : pushNeedsInstall() && pushKey !== '' ? `<section class="card"><span class="label">Timer alerts</span><p class="hint">To hear timers ring when ${esc(APP)} is closed or the screen is locked, add it to your home screen, open it from there, and turn on Timer alerts in Settings.</p><button class="pill" type="button" data-install style="justify-self:start">Add to home screen</button></section>` : ''}
     <section class="card"><span class="label">Contact & feedback</span><p class="hint">Found a bug, have an idea, or just want to say hi? It goes straight to the person who makes ${esc(APP)}.</p>
       <div class="ptools"><button class="pill soft" type="button" data-fb="bug">Report a bug</button><button class="pill soft" type="button" data-fb="idea">Request a feature</button><button class="pill soft" type="button" data-fb="hi">Say hi</button></div></section>
     ${isInstalled() ? '' : `<section class="card"><span class="label">Get the app</span><p class="hint">Put ${esc(APP)} on your phone’s home screen. It opens full screen like a regular app. Free, no app store.</p><button class="pill" type="button" data-install style="justify-self:start">Add to home screen</button></section>`}
@@ -1384,6 +1387,9 @@ function bindAll() {
   on('replayTour', () => { S.ptab = 'kids'; render(); window.scrollTo(0, 0); tourStart() });
   on('savLock', () => { const v = $('savLock').getAttribute('aria-pressed') !== 'true'; $('savLock').setAttribute('aria-pressed', v);
     act(() => q(sb.from('families').update({ savings_locked: v }).eq('id', S.family.id)), v ? 'Savings locked' : 'Savings unlocked') });
+  on('pushTog', () => { const b = $('pushTog');
+    if (pushOn()) { b.setAttribute('aria-pressed', false); pushDisable().then(() => toast('Timer alerts are off on this device.')) }
+    else pushEnable().then(ok => { b.setAttribute('aria-pressed', ok); if (ok) toast('Timer alerts are on. This device rings when a timer ends.') }) });
   on('penTog', () => { const b = $('penTog'), v = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', v); $('penMore').hidden = !v });
   each('[data-pnm]', el => { $('penNm').value = el.dataset.pnm });
   on('penSave', () => { const v = $('penTog').getAttribute('aria-pressed') === 'true', nm = titleCase($('penNm').value.trim()) || 'Oops Jar';
@@ -1455,7 +1461,7 @@ function timerPickHTML(kind, st, maxMin) {
     <div class="seg tmode"><button type="button" data-tm="watch" aria-pressed="${st.mode === 'watch'}">${I.clock}Stopwatch</button><button type="button" data-tm="timer" aria-pressed="${st.mode === 'timer'}">${I.bell}Timer</button></div>
     ${st.mode === 'timer' ? `<div class="chips tmins ${ch.length > 12 ? 'scroll' : ''}" role="radiogroup" aria-label="Minutes">${ch.map(m => `<button class="chip" type="button" role="radio" data-tmin="${m}" aria-checked="${m === st.min}" aria-pressed="${m === st.min}">${kind === 'screen' && m === maxMin ? `All ${minLabel(m)}` : minLabel(m)}</button>`).join('')}</div>
       <div class="tcustom"><label for="tminIn">Or type the minutes</label><span class="minin"><input id="tminIn" type="number" inputmode="numeric" min="1" max="${maxMin}" step="1" value="${st.min}" data-kind="${kind}"><span>min</span></span></div>
-      <p class="hint" id="tHint">${timerHint(kind, st.min)}</p>`
+      <p class="hint" id="tHint">${timerHint(kind, st.min)}</p>${alertLineHTML()}`
       : `<p class="hint">${kind === 'screen' ? 'Runs until you stop it. At zero for the week, screens go off.' : 'Counts up until you tap I’m done.'}</p>`}</div>`;
 }
 /* Pick a valid starting choice: the last one used, or the closest that still fits. */
@@ -1469,6 +1475,8 @@ function bindTimerPick(st, redraw) {
   const sel = layer.querySelector('.tmins [aria-checked="true"]'); if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
   layer.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => { st.mode = b.dataset.tm; redraw() });
   layer.querySelectorAll('[data-tmin]').forEach(b => b.onclick = () => { st.min = Number(b.dataset.tmin); redraw() });
+  const pg = layer.querySelector('#pushGo'); if (pg) pg.onclick = () => pushEnable().then(ok => { if (ok) { toast('Done! Timers ring on this device even when the app is closed.'); redraw() } });
+  layer.querySelectorAll('.alertline [data-install]').forEach(b => b.onclick = () => installSheet());
   // Typing updates the chips, the hint and the start button in place, so the keyboard stays up.
   const inp = layer.querySelector('#tminIn'); if (!inp) return;
   const max = Number(inp.max), kind = inp.dataset.kind;
@@ -1568,9 +1576,9 @@ setInterval(() => {
   if (id !== wasActive) { if (id) holdWake(); else releaseWake(); wasActive = id }
   const tg = sessTarget(a);
   if (a && a.running_since && tg && liveSec(a) >= tg && x.leftSec > 0 && !autoStopping) {
-    autoStopping = true;
+    autoStopping = true; const quiet = pushOn() && liveSec(a) - tg > 10;
     doneTimer('screen_sessions', a, null, null, tg).then(() => ringAlarm('Time\u2019s up!', `Your ${minLabel(Math.round(tg / 60))} of screens are done. ${screenWeek(kid).leftSec ? `${dur(screenWeek(kid).leftSec)} left this week.` : 'That was the last of this week\u2019s screen time.'}`,
-      () => celebrate('Screens off. Nice job!', screenWeek(kid).leftSec ? `You still have ${dur(screenWeek(kid).leftSec)} saved for later.` : 'New screen time starts Monday.', { power: .6, icon: 'check' }))).finally(() => { autoStopping = false });
+      () => celebrate('Screens off. Nice job!', screenWeek(kid).leftSec ? `You still have ${dur(screenWeek(kid).leftSec)} saved for later.` : 'New screen time starts Monday.', { power: .6, icon: 'check' }), { quiet })).finally(() => { autoStopping = false });
     return;
   }
   if (a && a.running_since && x.leftSec <= 0 && !autoStopping) {
@@ -1583,11 +1591,11 @@ setInterval(() => {
   if (r && r.running_since) {
     const rt = sessTarget(r);
     if (rt && liveSec(r) >= rt && !autoStopping) {
-      autoStopping = true; const before = Math.min(Number(kid.reading_cap) || 0, Math.floor((readWeek(kid).sec - readSec(r, kid)) / 60));
+      autoStopping = true; const quiet = pushOn() && liveSec(r) - rt > 10; const before = Math.min(Number(kid.reading_cap) || 0, Math.floor((readWeek(kid).sec - readSec(r, kid)) / 60));
       doneTimer('reading_sessions', r, null, kid, rt).then(() => ringAlarm('Time\u2019s up!', `You read ${minLabel(Math.round(rt / 60))}!`, () => {
         const after = readWeek(kid).bonus, earned = after - before;
         celebrate(`You read ${dur(rt)}!`, readCheer(kid, before, after), { power: earned > 0 ? 1.3 : .8, icon: 'read' });
-      })).finally(() => { autoStopping = false });
+      }, { quiet })).finally(() => { autoStopping = false });
       return;
     }
     if (liveSec(r) >= capSec(kid) && !autoStopping) { autoStopping = true; doneTimer('reading_sessions', r, 'Reading timer stopped after 3 hours. Was it left on?', kid).finally(() => { autoStopping = false }); return }
@@ -1606,12 +1614,13 @@ function alarmSound() {
   } catch (e) { }
   try { navigator.vibrate?.([180, 80, 180, 80, 180]) } catch (e) { }
 }
-function ringAlarm(title, sub, after) {
+/* quiet: show the card without the sound (the push already rang while the app was closed) */
+function ringAlarm(title, sub, after, opt = {}) {
   stopAlarm(); const started = Date.now();
   const el = alarmEl = document.createElement('div'); el.className = 'alarm'; el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', title);
   el.innerHTML = `<div class="alarm-card"><span class="alarm-bell">${I.bell}</span><b>${esc(title)}</b><span>${esc(sub)}</span><button class="save alarm-off" type="button">Turn off</button></div>`;
   document.body.appendChild(el);
-  alarmSound(); alarmTimer = setInterval(() => { if (Date.now() - started > 120000) { clearInterval(alarmTimer); return } alarmSound() }, 1500);
+  if (!opt.quiet) { alarmSound(); alarmTimer = setInterval(() => { if (Date.now() - started > 120000) { clearInterval(alarmTimer); return } alarmSound() }, 1500) }
   el.querySelector('.alarm-off').onclick = () => { stopAlarm(); after && after() };
   el.querySelector('.alarm-off').focus({ preventScroll: true, focusVisible: false });
 }
@@ -1620,6 +1629,58 @@ function stopAlarm() { clearInterval(alarmTimer); try { navigator.vibrate?.(0) }
 document.addEventListener('pointerdown', () => unlockAudio(), { passive: true });
 async function holdWake() { try { wakeLock = await navigator.wakeLock?.request('screen') } catch (e) { } }
 function releaseWake() { try { wakeLock?.release(); wakeLock = null } catch (e) { } }
+
+/* ---------- timer alerts: ring this device when a timer ends, even with the app closed (web push) ----------
+   The database notices a timer ran out and sends a push through netlify/functions/ring.js; sw.js shows it with
+   the device's notification sound. Each phone or tablet turns it on for itself, and it rings for every kid's timer.
+   iPhone and iPad can only do this from the home-screen app. */
+const pushOK = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && /(^|\.)paperpig\.app$|\.netlify\.app$/.test(location.hostname);
+const pushNeedsInstall = () => !pushOK() && isIOS() && !isInstalled();
+let pushKey = null; // the server's public push key; '' when alerts aren't set up there
+async function pushKeyGet() {
+  if (pushKey !== null) return pushKey;
+  try { const j = await (await fetch('/.netlify/functions/ring', { cache: 'no-store' })).json(); pushKey = j.ready && j.publicKey ? j.publicKey : '' } catch (e) { return '' }
+  return pushKey;
+}
+if (/(^|\.)paperpig\.app$|\.netlify\.app$/.test(location.hostname)) pushKeyGet();
+const pushOn = () => pushOK() && store.get('push') === '1' && Notification.permission === 'granted';
+const b64u = s => { const b = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)) };
+const sameKey = (sub, key) => { try { const a = new Uint8Array(sub.options.applicationServerKey), b = b64u(key); return a.length === b.length && a.every((v, i) => v === b[i]) } catch (e) { return true } };
+const devName = () => /iPhone|iPod/.test(navigator.userAgent) ? 'iPhone' : isIOS() ? 'iPad' : /Android/i.test(navigator.userAgent) ? 'Android' : 'Computer';
+async function pushSub(key) {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && !sameKey(sub, key)) { await sub.unsubscribe().catch(() => { }); sub = null }
+  sub = sub || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(key) });
+  const j = sub.toJSON();
+  const { error } = await sb.rpc('pp_save_push', { p_family: S.family.id, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_label: devName() });
+  if (error) throw error;
+}
+/* Turn it on for this device. The permission question comes first, while the tap still counts (Safari needs that). */
+async function pushEnable() {
+  if (!pushOK()) return false;
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast(perm === 'denied' ? 'Notifications are blocked for Paper Pig. Allow them in this device’s settings, then try again.' : 'No problem. Timers still ring while the app is open.'); return false }
+  try {
+    const key = await pushKeyGet(); if (!key) { toast('Timer alerts aren’t ready yet. Try again later.'); return false }
+    await pushSub(key); store.set('push', '1'); return true;
+  } catch (e) { toast(errMsg(e)); return false }
+}
+async function pushDisable() {
+  store.set('push', null);
+  try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (sub) { await sb.rpc('pp_drop_push', { p_endpoint: sub.endpoint }); await sub.unsubscribe() } } catch (e) { }
+}
+/* After sign-in: keep this device's push address saved and current (browsers change it now and then). */
+async function pushRefresh() { if (!pushOn() || !S.family) return; try { const key = await pushKeyGet(); if (key) await pushSub(key) } catch (e) { } }
+/* The line under a timer's minutes: will it ring with the app closed? */
+function alertLineHTML() {
+  if (pushKey === '') return '';
+  if (pushNeedsInstall()) return `<p class="hint alertline">${I.bell}<span>To ring with the app closed or the screen locked, <button class="link" type="button" data-install>add Paper Pig to your home screen</button>.</span></p>`;
+  if (!pushOK()) return '';
+  if (pushOn()) return `<p class="hint alertline on">${I.bell}<span>Rings on this device even if the app is closed.</span></p>`;
+  if (Notification.permission === 'denied') return `<p class="hint alertline">${I.bell}<span>Notifications are off for Paper Pig, so it only rings while the app is open.</span></p>`;
+  return `<button class="pill soft alertbtn" id="pushGo" type="button">${I.bell}Ring even when the app is closed</button>`;
+}
 
 /* ---------- sheets ---------- */
 const layer = $('layer');
@@ -1834,7 +1895,7 @@ function feedbackSheet(kind) {
 }
 const PRIVACY = [
   ['The short version', `${APP} is a free tool for families. It keeps as little as possible, never sells or shares it, and has no ads, trackers or analytics.`],
-  ['What we store', 'The parent or guardian\u2019s email address, used only to send sign-in codes. A family name, time zone and a scrambled (hashed) parent/guardian PIN. For each kid: a first name and color, allowance amount, job board, jobs and bonuses with their explanations, withdrawals and purchases with their explanations, a saving goal if one is set, reading sessions (book titles and time) and screen-time sessions.'],
+  ['What we store', 'The parent or guardian\u2019s email address, used only to send sign-in codes. A family name, time zone and a scrambled (hashed) parent/guardian PIN. For each kid: a first name and color, allowance amount, job board, jobs and bonuses with their explanations, withdrawals and purchases with their explanations, a saving goal if one is set, reading sessions (book titles and time) and screen-time sessions. If you turn on timer alerts, the push address your device’s browser gives us, so a timer can ring it.'],
   ['What we don\u2019t collect', 'No last names, birthdays, photos, locations, school names, contact details or anything else about kids. Kids never make an account or enter an email. Everything sits under the parent or guardian\u2019s account.'],
   ['Who can see it', 'Only the parents and guardians signed in to your family. Data is stored with Supabase and protected by database rules that keep each family\u2019s records separate from every other family\u2019s.'],
   ['Feedback messages', 'If you send a bug report, idea or message, it\u2019s delivered to the person who runs this site, along with the email you typed (optional) and which screen you were on.'],
@@ -1988,7 +2049,7 @@ async function enter(session) {
     let fid = (await q(sb.from('family_members').select('family_id').eq('user_id', S.user.id).limit(1)))[0]?.family_id;
     if (!fid) fid = await q(sb.rpc('accept_invites'));
     if (!fid) { S.onboard = { step: 'family', name: '', tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Denver', pin: '', kids: [], cur: null, jobs: null }; S.view = 'onboard'; return render() }
-    S.family = { id: fid }; await loadAll();
+    S.family = { id: fid }; await loadAll(); pushRefresh();
     const fresh = store.get('signed-in') !== S.user.id; store.set('signed-in', S.user.id); S.canResetPin = fresh;
     const p = store.get('profile');
     if (fresh || !S.family.pin_hash) { S.parentOk = false; S.view = 'who'; render(); if (!S.family.pin_hash) newPinSheet(true); return }

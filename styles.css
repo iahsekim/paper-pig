@@ -730,3 +730,10 @@ body[data-side="kid"] .pr.p,body[data-side="kid"] .pr.b{color:color-mix(in srgb,
 .tour-btns .pill{min-height:46px;padding:6px 18px}
 @media (max-width:360px){.tour-tip{padding:14px 13px 12px}.tour-tip p{font-size:14px}}
 @media (prefers-reduced-motion:reduce){#tour,.tour-tip,.tour-dim{transition:none}#tour.jump .tour-hole{transition:none}}
+
+/* timer alerts line under a timer's minutes */
+.alertline{display:flex;align-items:flex-start;gap:8px}
+.alertline>svg{width:18px;height:18px;flex:none;margin-top:1px}
+.alertline.on{color:var(--text)}
+.alertline .link{font-size:inherit;padding:0}
+.alertbtn{justify-self:start;margin-top:2px}

@@ -458,3 +458,108 @@ create trigger family_members_announce after insert on public.family_members
 -- only the database itself (and you, in the SQL editor) can send an alert
 revoke all on function public.pp_announce_member(uuid, uuid, boolean) from public, anon, authenticated;
 revoke all on function public.family_members_announce() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- timer alerts (ring with the app closed)
+-- A phone or tablet that turns on "Timer alerts" saves its push address here. Every 5 seconds the database
+-- looks for reading and screen timers that just ran out and asks the Netlify function /.netlify/functions/ring
+-- to send a "Time's up!" notification to every device in that family. It uses the same shared secret as the
+-- member alerts (pp_hook_secret in Vault). Needs Cron: if this part says Cron is missing, turn it on in
+-- Supabase (Integrations > Cron) and run this file again.
+create table if not exists public.push_subs (
+  endpoint    text primary key check (char_length(endpoint) between 10 and 1000),
+  family_id   uuid not null references public.families on delete cascade,
+  user_id     uuid,
+  p256dh      text not null check (char_length(p256dh) between 10 and 200),
+  auth        text not null check (char_length(auth) between 8 and 100),
+  label       text check (char_length(label) <= 80),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+-- No policies: the app only reaches this table through the two functions below.
+alter table public.push_subs enable row level security;
+
+-- When a timer's alert went out (the due time it was sent for), so it's sent once.
+alter table public.reading_sessions add column if not exists pushed_for timestamptz;
+alter table public.screen_sessions  add column if not exists pushed_for timestamptz;
+create index if not exists reading_running on public.reading_sessions (running_since) where ended_at is null and running_since is not null and target_seconds is not null;
+create index if not exists screen_running on public.screen_sessions (running_since) where ended_at is null and running_since is not null and target_seconds is not null;
+
+create or replace function public.pp_save_push(p_family uuid, p_endpoint text, p_p256dh text, p_auth text, p_label text default null)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_family is null or not exists (select 1 from public.my_family_ids() f where f = p_family) then raise exception 'Not your family'; end if;
+  if p_endpoint !~ '^https://' then raise exception 'That push address doesn''t look right'; end if;
+  insert into public.push_subs (endpoint, family_id, user_id, p256dh, auth, label)
+  values (p_endpoint, p_family, auth.uid(), p_p256dh, p_auth, left(p_label, 80))
+  on conflict (endpoint) do update set family_id = excluded.family_id, user_id = excluded.user_id, p256dh = excluded.p256dh,
+    auth = excluded.auth, label = excluded.label, updated_at = now();
+end $$;
+
+create or replace function public.pp_drop_push(p_endpoint text)
+returns void language sql security definer set search_path = public as $$
+  delete from public.push_subs where endpoint = p_endpoint and family_id in (select public.my_family_ids());
+$$;
+
+create or replace function public.pp_ring_due()
+returns int language plpgsql security definer set search_path = public as $$
+declare
+  sec text; r record; subs jsonb; n int := 0; what text; len text;
+begin
+  select decrypted_secret into sec from vault.decrypted_secrets where name = 'pp_hook_secret' limit 1;
+  if sec is null or sec = '' then return 0; end if;
+  -- forget devices the push service says are gone (the ring function reports them back)
+  begin
+    delete from public.push_subs where endpoint in (
+      select jsonb_array_elements_text(content::jsonb -> 'gone') from net._http_response
+       where created > now() - interval '15 minutes' and content like '{"ring":%');
+  exception when others then null; end;
+  for r in
+    with t as (
+      select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt, s.pushed_for,
+             s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds)) as due
+        from public.screen_sessions s
+       where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
+      union all
+      select 'read', s.id, s.family_id, s.kid_id, s.target_seconds, s.pushed_for,
+             s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds))
+        from public.reading_sessions s
+       where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
+    )
+    select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id
+     where t.due <= now() and t.due > now() - interval '10 minutes' and t.pushed_for is distinct from t.due
+  loop
+    if r.kind = 'screen' then update public.screen_sessions set pushed_for = r.due where id = r.id;
+    else update public.reading_sessions set pushed_for = r.due where id = r.id; end if;
+    select coalesce(jsonb_agg(jsonb_build_object('endpoint', p.endpoint, 'keys', jsonb_build_object('p256dh', p.p256dh, 'auth', p.auth))), '[]'::jsonb)
+      into subs from public.push_subs p where p.family_id = r.family_id;
+    if jsonb_array_length(subs) = 0 then continue; end if;
+    len := case when r.tgt >= 3600 then (r.tgt / 3600)::text || ' hr' || case when (r.tgt % 3600) / 60 > 0 then ' ' || ((r.tgt % 3600) / 60)::text || ' min' else '' end
+                else greatest(1, round(r.tgt / 60.0))::int::text || ' min' end;
+    what := case when r.kind = 'screen' then r.kid || '’s ' || len || ' of screens are done.' else r.kid || ' read for ' || len || '!' end;
+    perform net.http_post(
+      url := 'https://paperpig.app/.netlify/functions/ring',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'x-pp-hook', sec),
+      body := jsonb_build_object('title', 'Time’s up!', 'body', what, 'tag', 'pp-' || r.id, 'subs', subs),
+      timeout_milliseconds := 8000);
+    n := n + 1;
+  end loop;
+  return n;
+exception when others then
+  raise warning 'pp_ring_due: %', sqlerrm;
+  return n;
+end $$;
+
+revoke all on function public.pp_ring_due() from public, anon, authenticated;
+revoke all on function public.pp_save_push(uuid, text, text, text, text) from public, anon;
+revoke all on function public.pp_drop_push(text) from public, anon;
+grant execute on function public.pp_save_push(uuid, text, text, text, text) to authenticated;
+grant execute on function public.pp_drop_push(text) to authenticated;
+
+-- Check for finished timers every 5 seconds, and keep Cron's own log small.
+do $$ begin create extension if not exists pg_cron; exception when others then raise notice 'Cron is not available here: %', sqlerrm; end $$;
+do $$ begin
+  perform cron.schedule('pp-ring', '5 seconds', 'select public.pp_ring_due()');
+  perform cron.schedule('pp-cron-log-cleanup', '17 4 * * *', $c$delete from cron.job_run_details where end_time < now() - interval '1 day'$c$);
+exception when others then
+  raise notice 'Timer alerts need Cron. Turn it on in Supabase (Integrations > Cron), then run this file again. (%)', sqlerrm;
+end $$;
