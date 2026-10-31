@@ -462,7 +462,8 @@ revoke all on function public.family_members_announce() from public, anon, authe
 -- ---------------------------------------------------------------- timer alerts (ring with the app closed)
 -- A phone or tablet that turns on "Timer alerts" saves its push address here. Every 5 seconds the database
 -- looks for reading and screen timers that just ran out and asks the Netlify function /.netlify/functions/ring
--- to send a "Time's up!" notification to every device in that family. It uses the same shared secret as the
+-- to send a "Time's up!" notification to every device in that family. Like a kitchen timer, it keeps ringing:
+-- again every 10 seconds, for up to 2 minutes, until someone taps the notification or the timer is stopped. It uses the same shared secret as the
 -- member alerts (pp_hook_secret in Vault). Needs Cron: if this part says Cron is missing, turn it on in
 -- Supabase (Integrations > Cron) and run this file again.
 create table if not exists public.push_subs (
@@ -478,9 +479,13 @@ create table if not exists public.push_subs (
 -- No policies: the app only reaches this table through the two functions below.
 alter table public.push_subs enable row level security;
 
--- When a timer's alert went out (the due time it was sent for), so it's sent once.
+-- Which due time the alerts are for, how many have gone out, and the token a tap uses to stop them.
 alter table public.reading_sessions add column if not exists pushed_for timestamptz;
 alter table public.screen_sessions  add column if not exists pushed_for timestamptz;
+alter table public.reading_sessions add column if not exists rings smallint not null default 0;
+alter table public.screen_sessions  add column if not exists rings smallint not null default 0;
+alter table public.reading_sessions add column if not exists ring_token uuid;
+alter table public.screen_sessions  add column if not exists ring_token uuid;
 create index if not exists reading_running on public.reading_sessions (running_since) where ended_at is null and running_since is not null and target_seconds is not null;
 create index if not exists screen_running on public.screen_sessions (running_since) where ended_at is null and running_since is not null and target_seconds is not null;
 
@@ -503,7 +508,7 @@ $$;
 create or replace function public.pp_ring_due()
 returns int language plpgsql security definer set search_path = public as $$
 declare
-  sec text; r record; subs jsonb; n int := 0; what text; len text;
+  sec text; r record; subs jsonb; sent int := 0; k int; tok uuid; what text; len text;
 begin
   select decrypted_secret into sec from vault.decrypted_secrets where name = 'pp_hook_secret' limit 1;
   if sec is null or sec = '' then return 0; end if;
@@ -515,21 +520,25 @@ begin
   exception when others then null; end;
   for r in
     with t as (
-      select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt, s.pushed_for,
+      select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt, s.pushed_for, s.rings, s.ring_token,
              s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds)) as due
         from public.screen_sessions s
        where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
       union all
-      select 'read', s.id, s.family_id, s.kid_id, s.target_seconds, s.pushed_for,
+      select 'read', s.id, s.family_id, s.kid_id, s.target_seconds, s.pushed_for, s.rings, s.ring_token,
              s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds))
         from public.reading_sessions s
        where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
     )
     select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id
-     where t.due <= now() and t.due > now() - interval '10 minutes' and t.pushed_for is distinct from t.due
+     where t.due <= now() and t.due > now() - interval '10 minutes'
+       -- the first ring, then one every 10 seconds: 12 in all (2 minutes), unless a tap stopped it (rings = 99)
+       and (t.pushed_for is distinct from t.due or (t.rings < 12 and now() >= t.due + make_interval(secs => t.rings * 10)))
   loop
-    if r.kind = 'screen' then update public.screen_sessions set pushed_for = r.due where id = r.id;
-    else update public.reading_sessions set pushed_for = r.due where id = r.id; end if;
+    k := case when r.pushed_for is distinct from r.due then 0 else r.rings end;
+    tok := coalesce(r.ring_token, gen_random_uuid());
+    if r.kind = 'screen' then update public.screen_sessions set pushed_for = r.due, rings = k + 1, ring_token = tok where id = r.id;
+    else update public.reading_sessions set pushed_for = r.due, rings = k + 1, ring_token = tok where id = r.id; end if;
     select coalesce(jsonb_agg(jsonb_build_object('endpoint', p.endpoint, 'keys', jsonb_build_object('p256dh', p.p256dh, 'auth', p.auth))), '[]'::jsonb)
       into subs from public.push_subs p where p.family_id = r.family_id;
     if jsonb_array_length(subs) = 0 then continue; end if;
@@ -539,21 +548,31 @@ begin
     perform net.http_post(
       url := 'https://paperpig.app/.netlify/functions/ring',
       headers := jsonb_build_object('Content-Type', 'application/json', 'x-pp-hook', sec),
-      body := jsonb_build_object('title', 'Time’s up!', 'body', what, 'tag', 'pp-' || r.id, 'subs', subs),
+      body := jsonb_build_object('title', 'Time’s up!', 'body', what || ' Tap to turn it off.', 'sid', r.id, 'tok', tok, 'n', k, 'subs', subs),
       timeout_milliseconds := 8000);
-    n := n + 1;
+    sent := sent + 1;
   end loop;
-  return n;
+  return sent;
 exception when others then
   raise warning 'pp_ring_due: %', sqlerrm;
-  return n;
+  return sent;
 end $$;
+
+-- Tapping (or, on Android, swiping away) the notification stops the ringing. The phone may not be signed in
+-- at that moment, so it proves itself with the token that came with the notification instead.
+create or replace function public.pp_ring_off(p_id uuid, p_token uuid)
+returns void language sql security definer set search_path = public as $$
+  update public.screen_sessions set rings = 99 where id = p_id and ring_token = p_token;
+  update public.reading_sessions set rings = 99 where id = p_id and ring_token = p_token;
+$$;
 
 revoke all on function public.pp_ring_due() from public, anon, authenticated;
 revoke all on function public.pp_save_push(uuid, text, text, text, text) from public, anon;
 revoke all on function public.pp_drop_push(text) from public, anon;
 grant execute on function public.pp_save_push(uuid, text, text, text, text) to authenticated;
 grant execute on function public.pp_drop_push(text) to authenticated;
+revoke all on function public.pp_ring_off(uuid, uuid) from public;
+grant execute on function public.pp_ring_off(uuid, uuid) to anon, authenticated;
 
 -- Check for finished timers every 5 seconds, and keep Cron's own log small.
 do $$ begin create extension if not exists pg_cron; exception when others then raise notice 'Cron is not available here: %', sqlerrm; end $$;
