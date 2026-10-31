@@ -1325,7 +1325,7 @@ function pSettings() {
       <button class="pill" id="invGo" type="button" style="justify-self:start">Send invite</button>
       <p class="hint">We email them a link. They sign in with that email and join your family. Anyone you add can add or remove others too.</p></section>
     ${pushOK() && pushKey !== '' ? `<section class="card"><div class="togline"><span><span class="label">Timer alerts</span><b>Ring on this ${({ Android: 'phone', Computer: 'computer' })[devName()] || devName()} with the app closed</b></span><button class="tog" id="pushTog" type="button" aria-pressed="${pushOn()}" aria-label="Timer alerts on this device"></button></div>
-      <p class="hint">When any kid’s reading or screen timer ends, this device plays its notification sound, even if ${esc(APP)} is closed or the screen is locked. Turn it on for each phone or tablet that should ring. Silent mode and Do Not Disturb mute it.</p></section>`
+      <p class="hint">When any kid’s reading or screen timer ends, this device plays its notification sound, even if ${esc(APP)} is closed or the screen is locked. It’s on for each phone or tablet once you tap Allow (the first timer asks). Silent mode and Do Not Disturb mute it.</p></section>`
       : pushNeedsInstall() && pushKey !== '' ? `<section class="card"><span class="label">Timer alerts</span><p class="hint">To hear timers ring when ${esc(APP)} is closed or the screen is locked, add it to your home screen, open it from there, and turn on Timer alerts in Settings.</p><button class="pill" type="button" data-install style="justify-self:start">Add to home screen</button></section>` : ''}
     <section class="card"><span class="label">Contact & feedback</span><p class="hint">Found a bug, have an idea, or just want to say hi? It goes straight to the person who makes ${esc(APP)}.</p>
       <div class="ptools"><button class="pill soft" type="button" data-fb="bug">Report a bug</button><button class="pill soft" type="button" data-fb="idea">Request a feature</button><button class="pill soft" type="button" data-fb="hi">Say hi</button></div></section>
@@ -1518,6 +1518,7 @@ function screenStartSheet(kid) {
     bindTimerPick(st, draw);
     $('scrGo').onclick = async () => {
       const n = capFirst($('watchIn').value.trim()); if (!n) return toast('What are you watching?');
+      if (st.mode === 'timer') pushAutoAsk();
       store.set(TPREF('screen', kid), JSON.stringify(st)); closeSheet();
       await startScreen(kid, n, st.mode === 'timer' ? Math.min(st.min * 60, screenWeek(kid).leftSec) : 0);
       toast(st.mode === 'timer' ? `Enjoy ${n}! The timer rings in ${minLabel(st.min)}.` : `Enjoy ${n}!`);
@@ -1656,22 +1657,32 @@ async function pushSub(key) {
   const { error } = await sb.rpc('pp_save_push', { p_family: S.family.id, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_label: devName() });
   if (error) throw error;
 }
-/* Turn it on for this device. The permission question comes first, while the tap still counts (Safari needs that). */
-async function pushEnable() {
+/* Turn it on for this device. The permission question comes first, while the tap still counts (Safari needs that).
+   quiet: asked on its own when a timer starts, so a "no" doesn't get a message. */
+async function pushEnable(quiet) {
   if (!pushOK()) return false;
   const perm = await Notification.requestPermission();
-  if (perm !== 'granted') { toast(perm === 'denied' ? 'Notifications are blocked for Paper Pig. Allow them in this device’s settings, then try again.' : 'No problem. Timers still ring while the app is open.'); return false }
+  if (perm !== 'granted') { if (!quiet) toast(perm === 'denied' ? 'Notifications are blocked for Paper Pig. Allow them in this device’s settings, then try again.' : 'No problem. Timers still ring while the app is open.'); return false }
   try {
-    const key = await pushKeyGet(); if (!key) { toast('Timer alerts aren’t ready yet. Try again later.'); return false }
+    const key = await pushKeyGet(); if (!key) { if (!quiet) toast('Timer alerts aren’t ready yet. Try again later.'); return false }
     await pushSub(key); store.set('push', '1'); return true;
-  } catch (e) { toast(errMsg(e)); return false }
+  } catch (e) { if (!quiet) toast(errMsg(e)); return false }
+}
+/* On by default: the first timer started on a device asks to allow notifications (a browser only asks after a tap).
+   Allowed once, it stays on, unless someone turns Timer alerts off in Settings ('0'). */
+function pushAutoAsk() {
+  if (!pushOK() || !pushKey || pushOn() || store.get('push') === '0' || Notification.permission === 'denied') return;
+  pushEnable(true).then(ok => { if (ok) toast('This device will ring when the timer ends, even with the app closed.') });
 }
 async function pushDisable() {
-  store.set('push', null);
+  store.set('push', '0');
   try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (sub) { await sb.rpc('pp_drop_push', { p_endpoint: sub.endpoint }); await sub.unsubscribe() } } catch (e) { }
 }
 /* After sign-in: keep this device's push address saved and current (browsers change it now and then). */
-async function pushRefresh() { if (!pushOn() || !S.family) return; try { const key = await pushKeyGet(); if (key) await pushSub(key) } catch (e) { } }
+async function pushRefresh() {
+  if (!pushOK() || !S.family || store.get('push') === '0' || Notification.permission !== 'granted') return;
+  try { const key = await pushKeyGet(); if (key) { await pushSub(key); store.set('push', '1') } } catch (e) { }
+}
 /* The line under a timer's minutes: will it ring with the app closed? */
 function alertLineHTML() {
   if (pushKey === '') return '';
@@ -1679,7 +1690,9 @@ function alertLineHTML() {
   if (!pushOK()) return '';
   if (pushOn()) return `<p class="hint alertline on">${I.bell}<span>Rings on this device even if the app is closed.</span></p>`;
   if (Notification.permission === 'denied') return `<p class="hint alertline">${I.bell}<span>Notifications are off for Paper Pig, so it only rings while the app is open.</span></p>`;
-  return `<button class="pill soft alertbtn" id="pushGo" type="button">${I.bell}Ring even when the app is closed</button>`;
+  if (store.get('push') === '0') return `<button class="pill soft alertbtn" id="pushGo" type="button">${I.bell}Ring even when the app is closed</button>`;
+  if (Notification.permission === 'granted') return `<p class="hint alertline on">${I.bell}<span>Rings on this device even if the app is closed.</span></p>`;
+  return `<p class="hint alertline on">${I.bell}<span>Tap Allow when it asks, so it rings even with the app closed.</span></p>`;
 }
 
 /* ---------- sheets ---------- */
@@ -1741,6 +1754,7 @@ function readStartSheet(kid) {
     bindTimerPick(st, draw);
     $('rdGo').onclick = async () => {
       const bk = $('bookIn').value.trim(); if (!bk) return toast('Type the book’s title.'); if (activeRead(kid)) return closeSheet();
+      if (st.mode === 'timer') pushAutoAsk();
       store.set(TPREF('read', kid), JSON.stringify(st)); closeSheet(); const d = today();
       unlockAudio(); const now = new Date().toISOString();
       await act(() => insertSession('reading_sessions', { family_id: S.family.id, kid_id: kid.id, book: bk, local_date: d, week_start: monday(d), started_at: now, running_since: now, seconds: 0, source: 'timer' }, st.mode === 'timer' ? st.min * 60 : 0));
