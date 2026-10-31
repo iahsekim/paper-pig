@@ -1,7 +1,7 @@
 /* Paper Pig service worker: makes the site installable and lets it open without a connection.
    Always asks the network first, so families get updates right away; the saved copy is only a fallback.
    Only this site's own files are kept. Sign-in, data (Supabase) and email are never cached. */
-const CACHE = 'paperpig-v3';
+const CACHE = 'paperpig-v4';
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/', '/index.html']).catch(() => { }))) });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())) });
 self.addEventListener('fetch', e => {
@@ -13,7 +13,7 @@ self.addEventListener('fetch', e => {
 
 /* Timer alerts: when a reading or screen timer runs out, the database sends a push (netlify/functions/ring.js),
    and this shows it with the phone's notification sound, even with the app closed or the screen locked.
-   It comes again every 10 seconds, for up to 2 minutes, until someone taps it (or swipes it away, where the
+   It comes again every 1.5 seconds, for up to 2 minutes, until someone taps it (or swipes it away, where the
    phone tells us). The tap stops the ringing with the token that came with it, signed in or not. */
 self.window = self;
 try { importScripts('/config.js') } catch (_) { }

@@ -1,6 +1,6 @@
 // Rings a family's phones and tablets when a reading or screen timer runs out, even when Paper Pig is closed
 // or the screen is locked. The database calls this when a timer ends (supabase/schema.sql, "timer alerts"), and again
-// every 10 seconds for up to 2 minutes until someone taps the notification, with the notification and the push
+// every 1.5 seconds for up to 2 minutes until someone taps the notification, with the notification and the push
 // addresses of the family's devices. Nobody else can: the request has to
 // carry the shared secret. Devices the push service says are gone come back in "gone", and the database forgets them.
 //
@@ -50,8 +50,8 @@ async function run(event) {
   const gone = []; let sent = 0;
   await Promise.all(subs.map(async (s) => {
     try {
-      // A ring is only useful right away: drop it if the device can't get it within a minute.
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } }, payload, { TTL: 60, urgency: 'high', timeout: 6000 });
+      // A ring is only useful right away (the next one is 1.5 seconds behind it): drop it if it can't arrive within 10 seconds.
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } }, payload, { TTL: 10, urgency: 'high', timeout: 5000 });
       sent++;
     } catch (e) {
       if (e && (e.statusCode === 404 || e.statusCode === 410)) gone.push(s.endpoint);

@@ -460,10 +460,11 @@ revoke all on function public.pp_announce_member(uuid, uuid, boolean) from publi
 revoke all on function public.family_members_announce() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------- timer alerts (ring with the app closed)
--- A phone or tablet that turns on "Timer alerts" saves its push address here. Every 5 seconds the database
+-- A phone or tablet that turns on "Timer alerts" saves its push address here. Every second the database
 -- looks for reading and screen timers that just ran out and asks the Netlify function /.netlify/functions/ring
--- to send a "Time's up!" notification to every device in that family. Like a kitchen timer, it keeps ringing:
--- again every 10 seconds, for up to 2 minutes, until someone taps the notification or the timer is stopped. It uses the same shared secret as the
+-- to send a "Time's up!" notification to every device in that family. Like an alarm, it keeps ringing: again
+-- every 1.5 seconds (the same beat as the bell in the app), for up to 2 minutes, until someone taps the
+-- notification or the timer is stopped. It uses the same shared secret as the
 -- member alerts (pp_hook_secret in Vault). Needs Cron: if this part says Cron is missing, turn it on in
 -- Supabase (Integrations > Cron) and run this file again.
 create table if not exists public.push_subs (
@@ -512,12 +513,6 @@ declare
 begin
   select decrypted_secret into sec from vault.decrypted_secrets where name = 'pp_hook_secret' limit 1;
   if sec is null or sec = '' then return 0; end if;
-  -- forget devices the push service says are gone (the ring function reports them back)
-  begin
-    delete from public.push_subs where endpoint in (
-      select jsonb_array_elements_text(content::jsonb -> 'gone') from net._http_response
-       where created > now() - interval '15 minutes' and content like '{"ring":%');
-  exception when others then null; end;
   for r in
     with t as (
       select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt, s.pushed_for, s.rings, s.ring_token,
@@ -532,8 +527,8 @@ begin
     )
     select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id
      where t.due <= now() and t.due > now() - interval '10 minutes'
-       -- the first ring, then one every 10 seconds: 12 in all (2 minutes), unless a tap stopped it (rings = 99)
-       and (t.pushed_for is distinct from t.due or (t.rings < 12 and now() >= t.due + make_interval(secs => t.rings * 10)))
+       -- the first ring, then one every 1.5 seconds: 80 in all (2 minutes), unless a tap stopped it (rings = 99)
+       and (t.pushed_for is distinct from t.due or (t.rings < 80 and now() >= t.due + make_interval(secs => t.rings * 1.5)))
   loop
     k := case when r.pushed_for is distinct from r.due then 0 else r.rings end;
     tok := coalesce(r.ring_token, gen_random_uuid());
@@ -558,6 +553,16 @@ exception when others then
   return sent;
 end $$;
 
+-- Once a minute: forget devices the push service says are gone (the ring function reports them back).
+create or replace function public.pp_forget_gone()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.push_subs where endpoint in (
+    select jsonb_array_elements_text(content::jsonb -> 'gone') from net._http_response
+     where created > now() - interval '15 minutes' and content like '{"ring":%');
+exception when others then null;
+end $$;
+
 -- Tapping (or, on Android, swiping away) the notification stops the ringing. The phone may not be signed in
 -- at that moment, so it proves itself with the token that came with the notification instead.
 create or replace function public.pp_ring_off(p_id uuid, p_token uuid)
@@ -567,6 +572,7 @@ returns void language sql security definer set search_path = public as $$
 $$;
 
 revoke all on function public.pp_ring_due() from public, anon, authenticated;
+revoke all on function public.pp_forget_gone() from public, anon, authenticated;
 revoke all on function public.pp_save_push(uuid, text, text, text, text) from public, anon;
 revoke all on function public.pp_drop_push(text) from public, anon;
 grant execute on function public.pp_save_push(uuid, text, text, text, text) to authenticated;
@@ -574,11 +580,12 @@ grant execute on function public.pp_drop_push(text) to authenticated;
 revoke all on function public.pp_ring_off(uuid, uuid) from public;
 grant execute on function public.pp_ring_off(uuid, uuid) to anon, authenticated;
 
--- Check for finished timers every 5 seconds, and keep Cron's own log small.
+-- Check for finished timers every second, tidy up once a minute, and keep Cron's own log small.
 do $$ begin create extension if not exists pg_cron; exception when others then raise notice 'Cron is not available here: %', sqlerrm; end $$;
 do $$ begin
-  perform cron.schedule('pp-ring', '5 seconds', 'select public.pp_ring_due()');
-  perform cron.schedule('pp-cron-log-cleanup', '17 4 * * *', $c$delete from cron.job_run_details where end_time < now() - interval '1 day'$c$);
+  perform cron.schedule('pp-ring', '1 seconds', 'select public.pp_ring_due()');
+  perform cron.schedule('pp-forget-gone', '* * * * *', 'select public.pp_forget_gone()');
+  perform cron.schedule('pp-cron-log-cleanup', '7 * * * *', $c$delete from cron.job_run_details where end_time < now() - interval '1 hour'$c$);
 exception when others then
   raise notice 'Timer alerts need Cron. Turn it on in Supabase (Integrations > Cron), then run this file again. (%)', sqlerrm;
 end $$;
