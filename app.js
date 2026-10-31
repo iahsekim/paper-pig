@@ -1327,6 +1327,9 @@ function pSettings() {
     ${pushOK() && pushKey !== '' ? `<section class="card"><div class="togline"><span><span class="label">Timer alerts</span><b>Ring on this ${({ Android: 'phone', Computer: 'computer' })[devName()] || devName()} with the app closed</b></span><button class="tog" id="pushTog" type="button" aria-pressed="${pushOn()}" aria-label="Timer alerts on this device"></button></div>
       <p class="hint">When any kid’s reading or screen timer ends, this device gets a “Time’s up!” notification with its notification sound, even if ${esc(APP)} is closed or the screen is locked. It’s on once you tap Allow (the first timer asks). Silent mode and Do Not Disturb mute it.</p></section>`
       : pushNeedsInstall() && pushKey !== '' ? `<section class="card"><span class="label">Timer alerts</span><p class="hint">To hear timers ring when ${esc(APP)} is closed or the screen is locked, add it to your home screen, open it from there, and turn on Timer alerts in Settings.</p><button class="pill" type="button" data-install style="justify-self:start">Add to home screen</button></section>` : ''}
+    ${isIOS() ? `<section class="card"><div class="togline"><span><span class="label">${devName()} Clock timer</span><b>Also start this ${devName()}’s own timer</b></span><button class="tog" id="clockTog" type="button" aria-pressed="${clockOn()}" aria-label="Also start the Clock timer on this device"></button></div>
+      <p class="hint">Starting a timer in ${esc(APP)} also starts the Clock app’s timer for the same time. That’s the real timer sound: it rings until you stop it, even on a black screen or in silent mode. It needs a shortcut on this ${devName()}, made once:</p>
+      ${clockSetupHTML()}<div class="ptools"><button class="pill soft" id="clockTest" type="button">Test it: 10 seconds</button></div></section>` : ''}
     <section class="card"><span class="label">Contact & feedback</span><p class="hint">Found a bug, have an idea, or just want to say hi? It goes straight to the person who makes ${esc(APP)}.</p>
       <div class="ptools"><button class="pill soft" type="button" data-fb="bug">Report a bug</button><button class="pill soft" type="button" data-fb="idea">Request a feature</button><button class="pill soft" type="button" data-fb="hi">Say hi</button></div></section>
     ${isInstalled() ? '' : `<section class="card"><span class="label">Get the app</span><p class="hint">Put ${esc(APP)} on your phone’s home screen. It opens full screen like a regular app. Free, no app store.</p><button class="pill" type="button" data-install style="justify-self:start">Add to home screen</button></section>`}
@@ -1387,6 +1390,9 @@ function bindAll() {
   on('replayTour', () => { S.ptab = 'kids'; render(); window.scrollTo(0, 0); tourStart() });
   on('savLock', () => { const v = $('savLock').getAttribute('aria-pressed') !== 'true'; $('savLock').setAttribute('aria-pressed', v);
     act(() => q(sb.from('families').update({ savings_locked: v }).eq('id', S.family.id)), v ? 'Savings locked' : 'Savings unlocked') });
+  on('clockTog', () => { const b = $('clockTog'), v = !clockOn(); store.set('clock', v ? '1' : null); b.setAttribute('aria-pressed', v);
+    toast(v ? 'On. Paper Pig timers start the Clock timer on this device too.' : 'Off. Only Paper Pig’s own alerts now.') });
+  on('clockTest', () => { const was = store.get('clock'); store.set('clock', '1'); clockStart(10); store.set('clock', was) });
   on('pushTog', () => { const b = $('pushTog');
     if (pushOn()) { b.setAttribute('aria-pressed', false); pushDisable().then(() => toast('Timer alerts are off on this device.')) }
     else pushEnable().then(ok => { b.setAttribute('aria-pressed', ok); if (ok) toast('Timer alerts are on. This device rings when a timer ends.') }) });
@@ -1518,18 +1524,19 @@ function screenStartSheet(kid) {
     bindTimerPick(st, draw);
     $('scrGo').onclick = async () => {
       const n = capFirst($('watchIn').value.trim()); if (!n) return toast('What are you watching?');
-      if (st.mode === 'timer') pushAutoAsk();
+      const tsec = st.mode === 'timer' ? Math.min(st.min * 60, screenWeek(kid).leftSec) : 0;
+      if (tsec && !clockOn()) pushAutoAsk();
       store.set(TPREF('screen', kid), JSON.stringify(st)); closeSheet();
-      await startScreen(kid, n, st.mode === 'timer' ? Math.min(st.min * 60, screenWeek(kid).leftSec) : 0);
+      await startScreen(kid, n, tsec); clockStart(tsec);
       toast(st.mode === 'timer' ? `Enjoy ${n}! The timer rings in ${minLabel(st.min)}.` : `Enjoy ${n}!`);
     };
   });
   draw();
 }
 const timerSec = (row, kid) => kid ? Math.min(liveSec(row), capSec(kid)) : liveSec(row);
-async function pauseTimer(table, row, kid) { if (!row || !row.running_since) return; await act(() => q(sb.from(table).update({ seconds: timerSec(row, kid), running_since: null }).eq('id', row.id)), 'Paused. Your time is saved.') }
-async function resumeTimer(table, row) { if (!row || row.running_since) return; await act(() => q(sb.from(table).update({ running_since: new Date().toISOString() }).eq('id', row.id))) }
-async function doneTimer(table, row, msg, kid, secOverride) { if (!row) return; const sec = secOverride ?? timerSec(row, kid); await act(() => q(sb.from(table).update({ seconds: sec, running_since: null, ended_at: new Date().toISOString() }).eq('id', row.id)), msg) }
+async function pauseTimer(table, row, kid) { if (!row || !row.running_since) return; const clk = clockLeftover(row, kid); await act(() => q(sb.from(table).update({ seconds: timerSec(row, kid), running_since: null }).eq('id', row.id)), clk ? 'Paused. Stop the timer in the Clock app too. Resume starts a new one.' : 'Paused. Your time is saved.') }
+async function resumeTimer(table, row) { if (!row || row.running_since) return; await act(() => q(sb.from(table).update({ running_since: new Date().toISOString() }).eq('id', row.id))); if (sessTarget(row)) clockStart(sessTarget(row) - (Number(row.seconds) || 0)) }
+async function doneTimer(table, row, msg, kid, secOverride) { if (!row) return; if (secOverride == null && clockLeftover(row, kid)) setTimeout(() => toast('Stop the timer in the Clock app too.'), 700); const sec = secOverride ?? timerSec(row, kid); await act(() => q(sb.from(table).update({ seconds: sec, running_since: null, ended_at: new Date().toISOString() }).eq('id', row.id)), msg) }
 async function stopRead(kid) {
   const a = activeRead(kid); if (!a) return; const sec = timerSec(a, kid), before = Math.min(Number(kid.reading_cap) || 0, Math.floor((readWeek(kid).sec - readSec(a, kid)) / 60));
   await doneTimer('reading_sessions', a, null, kid);
@@ -1683,8 +1690,25 @@ async function pushRefresh() {
   if (!pushOK() || !S.family || store.get('push') === '0' || Notification.permission !== 'granted') return;
   try { const key = await pushKeyGet(); if (key) { await pushSub(key); store.set('push', '1') } } catch (e) { }
 }
+/* ---------- the iPhone's own Clock timer ----------
+   A website can't loop a sound or ring on a black screen, but the Clock app's timer can. With this on (per device),
+   starting or resuming a Paper Pig timer also runs the "Paper Pig Timer" shortcut, which starts the Clock timer for
+   the same number of seconds. The shortcut is made once per device (Settings shows how, or CFG.timerShortcut links
+   to a ready-made one). Shortcuts can't pause or cancel a Clock timer, so pausing or stopping early says so. */
+const CLOCK_SC = 'Paper Pig Timer';
+const clockOn = () => isIOS() && store.get('clock') === '1';
+function clockStart(sec) {
+  sec = Math.round(sec); if (!clockOn() || !(sec > 0)) return;
+  location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(CLOCK_SC) + '&input=text&text=' + sec;
+}
+const clockLeftover = (row, kid) => clockOn() && sessTarget(row) && sessTarget(row) - (kid ? timerSec(row, kid) : liveSec(row)) > 5;
+function clockSetupHTML() {
+  return CFG.timerShortcut ? `<a class="pill" href="${esc(CFG.timerShortcut)}" target="_blank" rel="noopener" style="justify-self:start">Add the Paper Pig Timer shortcut</a>`
+    : `<ol class="isteps"><li>Open the <b>Shortcuts</b> app and tap <b>+</b>.</li><li>Add the <b>Start Timer</b> action. Tap its number, choose <b>Shortcut Input</b>, then change <b>minutes</b> to <b>seconds</b>.</li><li>Name the shortcut <b>${CLOCK_SC}</b> exactly, and tap <b>Done</b>.</li></ol>`;
+}
 /* The line under a timer's minutes: will it ring with the app closed? */
 function alertLineHTML() {
+  if (clockOn()) return `<p class="hint alertline on">${I.bell}<span>Starts this ${devName()}’s Clock timer too, so it rings until you stop it.</span></p>`;
   if (pushKey === '') return '';
   if (pushNeedsInstall()) return `<p class="hint alertline">${I.bell}<span>To ring with the app closed or the screen locked, <button class="link" type="button" data-install>add Paper Pig to your home screen</button>.</span></p>`;
   if (!pushOK()) return '';
@@ -1754,10 +1778,11 @@ function readStartSheet(kid) {
     bindTimerPick(st, draw);
     $('rdGo').onclick = async () => {
       const bk = $('bookIn').value.trim(); if (!bk) return toast('Type the book’s title.'); if (activeRead(kid)) return closeSheet();
-      if (st.mode === 'timer') pushAutoAsk();
+      if (st.mode === 'timer' && !clockOn()) pushAutoAsk();
       store.set(TPREF('read', kid), JSON.stringify(st)); closeSheet(); const d = today();
       unlockAudio(); const now = new Date().toISOString();
       await act(() => insertSession('reading_sessions', { family_id: S.family.id, kid_id: kid.id, book: bk, local_date: d, week_start: monday(d), started_at: now, running_since: now, seconds: 0, source: 'timer' }, st.mode === 'timer' ? st.min * 60 : 0));
+      if (st.mode === 'timer') clockStart(st.min * 60);
       toast(st.mode === 'timer' ? `Happy reading! The timer rings in ${minLabel(st.min)}.` : `Happy reading! Enjoy ${bk}.`);
     };
   });
