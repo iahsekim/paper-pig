@@ -462,9 +462,7 @@ revoke all on function public.family_members_announce() from public, anon, authe
 -- ---------------------------------------------------------------- timer alerts (ring with the app closed)
 -- A phone or tablet that turns on "Timer alerts" saves its push address here. Every second the database
 -- looks for reading and screen timers that just ran out and asks the Netlify function /.netlify/functions/ring
--- to send a "Time's up!" notification to every device in that family. Like an alarm, it keeps ringing: again
--- every 1.5 seconds (the same beat as the bell in the app), for up to 2 minutes, until someone taps the
--- notification or the timer is stopped. It uses the same shared secret as the
+-- to send one "Time's up!" notification to every device in that family. It uses the same shared secret as the
 -- member alerts (pp_hook_secret in Vault). Needs Cron: if this part says Cron is missing, turn it on in
 -- Supabase (Integrations > Cron) and run this file again.
 create table if not exists public.push_subs (
@@ -527,8 +525,8 @@ begin
     )
     select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id
      where t.due <= now() and t.due > now() - interval '10 minutes'
-       -- the first ring, then one every 1.5 seconds: 80 in all (2 minutes), unless a tap stopped it (rings = 99)
-       and (t.pushed_for is distinct from t.due or (t.rings < 80 and now() >= t.due + make_interval(secs => t.rings * 1.5)))
+       -- once per due time (a pause and resume makes a new due time)
+       and t.pushed_for is distinct from t.due
   loop
     k := case when r.pushed_for is distinct from r.due then 0 else r.rings end;
     tok := coalesce(r.ring_token, gen_random_uuid());

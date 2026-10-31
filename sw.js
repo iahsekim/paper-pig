@@ -1,7 +1,7 @@
 /* Paper Pig service worker: makes the site installable and lets it open without a connection.
    Always asks the network first, so families get updates right away; the saved copy is only a fallback.
    Only this site's own files are kept. Sign-in, data (Supabase) and email are never cached. */
-const CACHE = 'paperpig-v4';
+const CACHE = 'paperpig-v5';
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/', '/index.html']).catch(() => { }))) });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())) });
 self.addEventListener('fetch', e => {
@@ -13,8 +13,7 @@ self.addEventListener('fetch', e => {
 
 /* Timer alerts: when a reading or screen timer runs out, the database sends a push (netlify/functions/ring.js),
    and this shows it with the phone's notification sound, even with the app closed or the screen locked.
-   It comes again every 1.5 seconds, for up to 2 minutes, until someone taps it (or swipes it away, where the
-   phone tells us). The tap stops the ringing with the token that came with it, signed in or not. */
+   A tap opens the app. */
 self.window = self;
 try { importScripts('/config.js') } catch (_) { }
 const CFG = self.CHORE_JAR_CONFIG || {};
@@ -28,13 +27,10 @@ self.addEventListener('push', e => {
   let d = {};
   try { d = e.data ? e.data.json() : {} } catch (_) { d = { body: e.data ? e.data.text() : '' } }
   e.waitUntil((async () => {
-    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    // The app is open and in front: it rings on its own, so this one stays quiet.
-    const open = wins.some(w => w.visibilityState === 'visible');
-    // One notification per timer: the new ring replaces the last one instead of piling up.
+    // Always with sound: a quiet one doesn't light up a sleeping screen, and a locked phone can still look "open".
     await closeRings(d.sid);
     await self.registration.showNotification(d.title || 'Time’s up!', {
-      body: d.body || 'A timer is done.', tag: (d.sid ? 'pp-' + d.sid : 'pp-timer') + '-' + (d.n || 0), requireInteraction: !open, silent: open,
+      body: d.body || 'A timer is done.', tag: d.sid ? 'pp-' + d.sid : 'pp-timer', requireInteraction: true,
       icon: '/icon-192.png', vibrate: [400, 150, 400, 150, 800], data: { url: d.url || '/', sid: d.sid || '', tok: d.tok || '' },
     });
   })());
