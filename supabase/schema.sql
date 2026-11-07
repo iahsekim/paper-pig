@@ -462,7 +462,8 @@ revoke all on function public.family_members_announce() from public, anon, authe
 -- ---------------------------------------------------------------- timer alerts (ring with the app closed)
 -- A phone or tablet that turns on "Timer alerts" saves its push address here. Every second the database
 -- looks for reading and screen timers that just ran out and asks the Netlify function /.netlify/functions/ring
--- to send one "Time's up!" notification to every device in that family. It uses the same shared secret as the
+-- to send one "Time's up!" notification to every device in that family. It also stops those timers at zero, so the
+-- clock never keeps running when nobody has the app open. It uses the same shared secret as the
 -- member alerts (pp_hook_secret in Vault). Needs Cron: if this part says Cron is missing, turn it on in
 -- Supabase (Integrations > Cron) and run this file again.
 create table if not exists public.push_subs (
@@ -504,34 +505,37 @@ returns void language sql security definer set search_path = public as $$
   delete from public.push_subs where endpoint = p_endpoint and family_id in (select public.my_family_ids());
 $$;
 
+-- Every second: a reading or screen timer that has reached zero stops right there, at exactly its length,
+-- even if no phone has the app open, so the minutes stop being used. Then the family's devices get one
+-- "Time's up!" notification (if it ran out in the last 10 minutes and timer alerts are set up).
 create or replace function public.pp_ring_due()
 returns int language plpgsql security definer set search_path = public as $$
 declare
-  sec text; r record; subs jsonb; sent int := 0; k int; tok uuid; what text; len text;
+  sec text; r record; subs jsonb; sent int := 0; what text; len text;
 begin
   select decrypted_secret into sec from vault.decrypted_secrets where name = 'pp_hook_secret' limit 1;
-  if sec is null or sec = '' then return 0; end if;
   for r in
     with t as (
-      select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt, s.pushed_for, s.rings, s.ring_token,
+      select 'screen' as kind, s.id, s.family_id, s.kid_id, s.target_seconds as tgt,
              s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds)) as due
         from public.screen_sessions s
        where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
       union all
-      select 'read', s.id, s.family_id, s.kid_id, s.target_seconds, s.pushed_for, s.rings, s.ring_token,
+      select 'read', s.id, s.family_id, s.kid_id, s.target_seconds,
              s.running_since + make_interval(secs => greatest(0, s.target_seconds - s.seconds))
         from public.reading_sessions s
        where s.ended_at is null and s.running_since is not null and s.target_seconds is not null
     )
-    select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id
-     where t.due <= now() and t.due > now() - interval '10 minutes'
-       -- once per due time (a pause and resume makes a new due time)
-       and t.pushed_for is distinct from t.due
+    select t.*, k.name as kid from t join public.kids k on k.id = t.kid_id where t.due <= now()
   loop
-    k := case when r.pushed_for is distinct from r.due then 0 else r.rings end;
-    tok := coalesce(r.ring_token, gen_random_uuid());
-    if r.kind = 'screen' then update public.screen_sessions set pushed_for = r.due, rings = k + 1, ring_token = tok where id = r.id;
-    else update public.reading_sessions set pushed_for = r.due, rings = k + 1, ring_token = tok where id = r.id; end if;
+    -- stop the clock at zero: exactly the timer's length is used, ending when it ran out
+    if r.kind = 'screen' then
+      update public.screen_sessions set seconds = greatest(seconds, r.tgt), running_since = null, ended_at = r.due, pushed_for = r.due where id = r.id;
+    else
+      update public.reading_sessions set seconds = greatest(seconds, r.tgt), running_since = null, ended_at = r.due, pushed_for = r.due where id = r.id;
+    end if;
+    -- then let the family know, unless it ran out long ago (say, before this was set up)
+    if sec is null or sec = '' or r.due < now() - interval '10 minutes' then continue; end if;
     select coalesce(jsonb_agg(jsonb_build_object('endpoint', p.endpoint, 'keys', jsonb_build_object('p256dh', p.p256dh, 'auth', p.auth))), '[]'::jsonb)
       into subs from public.push_subs p where p.family_id = r.family_id;
     if jsonb_array_length(subs) = 0 then continue; end if;
@@ -541,7 +545,7 @@ begin
     perform net.http_post(
       url := 'https://paperpig.app/.netlify/functions/ring',
       headers := jsonb_build_object('Content-Type', 'application/json', 'x-pp-hook', sec),
-      body := jsonb_build_object('title', 'Time’s up!', 'body', what || ' Tap to turn it off.', 'sid', r.id, 'tok', tok, 'n', k, 'subs', subs),
+      body := jsonb_build_object('title', 'Time’s up!', 'body', what, 'sid', r.id, 'subs', subs),
       timeout_milliseconds := 8000);
     sent := sent + 1;
   end loop;

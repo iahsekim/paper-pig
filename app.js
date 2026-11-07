@@ -174,7 +174,9 @@ function creditWeek() { return thisWeek() }
 /* ---------- reading + screen math ---------- */
 /* Everything is counted in seconds, so 10:40 + 10:20 = 21:00. A timer can be paused;
    its saved seconds plus the running stretch since running_since is the live total. */
-const liveSec = r => (Number(r.seconds) || 0) + (r.running_since && !r.ended_at ? Math.max(0, Math.floor((Date.now() - ms(r.running_since)) / 1000)) : 0);
+const rawSec = r => (Number(r.seconds) || 0) + (r.running_since && !r.ended_at ? Math.max(0, Math.floor((Date.now() - ms(r.running_since)) / 1000)) : 0);
+// A timer never counts past its length: the clock stops at zero, even before the stop has been saved.
+const liveSec = r => { const s = rawSec(r), t = sessTarget(r); return t ? Math.min(s, t) : s };
 /* No per-kid session limit. A 3-hour guard only catches a timer someone forgot to stop. */
 const READ_GUARD_SEC = 3 * 60 * 60;
 const capSec = () => READ_GUARD_SEC;
@@ -1571,13 +1573,29 @@ function statementSheet(kid) {
 function bindUndo(root) { root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit)) }
 /* ticking: updates the display; it only writes to stop a timer that has run out */
 let wasActive = null, wakeLock = null, audio = null, autoStopping = false;
+const stopping = new Set();
+/* Any other timer that has reached zero (another kid's, or while on the grown-up side) stops at exactly its length
+   too. The database does this as well, every second; this covers the moment before it does. */
+function stopFinishedTimers() {
+  if (!S.family || !S.kids) return;
+  for (const k of S.kids) {
+    if (S.view === 'kid' && k.id === S.profile) continue; // this kid's screen rings for it below
+    [[screenWeek(k).active, 'screen_sessions'], [activeRead(k), 'reading_sessions']].forEach(([row, table]) => {
+      const tg = sessTarget(row);
+      if (row && row.running_since && tg && rawSec(row) >= tg && !stopping.has(row.id)) {
+        stopping.add(row.id); doneTimer(table, row, null, null, tg).finally(() => stopping.delete(row.id));
+      }
+    });
+  }
+}
 setInterval(() => {
+  if (S.view === 'kid' || S.view === 'parent') stopFinishedTimers();
   if (S.view !== 'kid') return; const kid = kidById(S.profile); if (!kid) return;
   const x = screenWeek(kid), a = x.active, r0 = activeRead(kid), id = (a && a.running_since ? a.id : '') + (r0 && r0.running_since ? r0.id : '') || null;
   if (id !== wasActive) { if (id) holdWake(); else releaseWake(); wasActive = id }
   const tg = sessTarget(a);
   if (a && a.running_since && tg && liveSec(a) >= tg && x.leftSec > 0 && !autoStopping) {
-    autoStopping = true; const quiet = pushOn() && liveSec(a) - tg > 10;
+    autoStopping = true; const quiet = pushOn() && rawSec(a) - tg > 10;
     doneTimer('screen_sessions', a, null, null, tg).then(() => ringAlarm('Time\u2019s up!', `Your ${minLabel(Math.round(tg / 60))} of screens are done. ${screenWeek(kid).leftSec ? `${dur(screenWeek(kid).leftSec)} left this week.` : 'That was the last of this week\u2019s screen time.'}`,
       () => celebrate('Screens off. Nice job!', screenWeek(kid).leftSec ? `You still have ${dur(screenWeek(kid).leftSec)} saved for later.` : 'New screen time starts Monday.', { power: .6, icon: 'check' }), { quiet })).finally(() => { autoStopping = false });
     return;
@@ -1592,7 +1610,7 @@ setInterval(() => {
   if (r && r.running_since) {
     const rt = sessTarget(r);
     if (rt && liveSec(r) >= rt && !autoStopping) {
-      autoStopping = true; const quiet = pushOn() && liveSec(r) - rt > 10; const before = Math.min(Number(kid.reading_cap) || 0, Math.floor((readWeek(kid).sec - readSec(r, kid)) / 60));
+      autoStopping = true; const quiet = pushOn() && rawSec(r) - rt > 10; const before = Math.min(Number(kid.reading_cap) || 0, Math.floor((readWeek(kid).sec - readSec(r, kid)) / 60));
       doneTimer('reading_sessions', r, null, kid, rt).then(() => ringAlarm('Time\u2019s up!', `You read ${minLabel(Math.round(rt / 60))}!`, () => {
         const after = readWeek(kid).bonus, earned = after - before;
         celebrate(`You read ${dur(rt)}!`, readCheer(kid, before, after), { power: earned > 0 ? 1.3 : .8, icon: 'read' });
