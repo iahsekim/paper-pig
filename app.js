@@ -42,7 +42,7 @@ const zonedISO = (d, hm = '12:00') => {
 const pad = n => String(n).padStart(2, '0');
 const fmt = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}` };
 const r2 = n => Math.round(n * 100) / 100;
-const money = n => (n < 0 ? '−' : '') + '$' + Math.abs(n).toFixed(2);
+const money = n => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ms = iso => iso ? new Date(iso).getTime() : 0;
 const $ = id => document.getElementById(id);
@@ -742,6 +742,7 @@ function unseenMoney(kid) {
 }
 const hello = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' };
 /* Who's using: each kid is their own paper pig, in their color, with a reason to tap. */
+const tileMoney = n => money(n).replace(/\.00$/, ''); // $16, but $16.50
 function whoHTML() {
   const tiles = S.kids.map((k, i) => {
     const st = stats(k), sw = screenWeek(k), news = unseenMoney(k), pend = pendingClaims(k).length, ready = kidGoals(k).find(goalReady);
@@ -751,13 +752,17 @@ function whoHTML() {
       ${news > 0 ? `<span class="news">+${money(news)} new!</span>` : ''}
       <span class="kt-face">${esc((k.name || '?').slice(0, 1).toUpperCase())}</span>
       <b class="kt-name">${esc(k.name)}</b>
-      <span class="kt-info"><span class="kt-bal">${coinSVG('mini')}${money(st.bank)}</span>
+      <span class="kt-info"><span class="kt-bal">${coinSVG('mini')}${tileMoney(st.bank)}</span>
         <span class="kt-sub">${ready ? `Enough for ${esc(goalLabel(ready))}!` : st.saved > 0 ? `in the bank · ${money(st.saved)} saved` : 'in the bank'}</span>
         ${extra ? `<span class="kt-line">${extra}</span>` : ''}</span></button>`;
   }).join('');
+  // Every balance is the same size, small enough for the longest one to fit its box ($5 up to $1,500 and on).
+  // --balw is that amount's width in em, plus the coin; the CSS turns it into a font size for the box.
+  const emW = t => [...t].reduce((a, c) => a + (c === ',' || c === '.' ? .3 : c === '$' ? .67 : .68), 0) + .95;
+  const balw = Math.max(3.6, ...S.kids.map(k => emW(tileMoney(stats(k).bank)))).toFixed(2);
   return `<section class="screen-center whoscreen">${logoAnim()}
     <h2 class="who-q">${hello()}! Who's here?</h2>
-    ${S.kids.length ? `<div class="kidtiles ${S.kids.length === 1 ? 'one' : ''}">${tiles}</div>` : '<p class="hint" style="text-align:center">No kids yet. Choose Parent/guardian to add one.</p>'}
+    ${S.kids.length ? `<div class="kidtiles ${S.kids.length === 1 ? 'one' : ''}" style="--balw:${balw}">${tiles}</div>` : '<p class="hint" style="text-align:center">No kids yet. Choose Parent/guardian to add one.</p>'}
     <button class="partile" type="button" data-who="parent"><span class="pt-lock">${I.lock}</span><span class="t"><b>Parent/guardian</b><span>Settings, approvals and the ledger. PIN needed.</span></span>${I.chev}</button>
     <div class="foot">${supportHTML()}<span>${installLink()}<button class="link" type="button" data-fb="hi">Feedback</button> · <button class="link" id="signOutWho" type="button">Switch account</button></span></div></section>`;
 }

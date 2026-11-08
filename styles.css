@@ -533,7 +533,7 @@ body[data-side="kid"] .pr.p,body[data-side="kid"] .pr.b{color:color-mix(in srgb,
 .kidtiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 14px;padding-top:6px}
 .kidtiles.one{grid-template-columns:minmax(0,1fr)}
 .kidtiles .kidtile:last-child:nth-child(odd):not(:first-child){grid-column:1/-1}
-.kidtile{position:relative;display:grid;justify-items:center;gap:8px;padding:30px 12px 16px;min-width:0;
+.kidtile{position:relative;display:grid;justify-items:center;gap:8px;padding:30px 10px 16px;min-width:0;
   background:var(--kc);color:#fff;border:var(--line-w) solid var(--edge);border-radius:0 0 26px 26px;box-shadow:0 6px 0 var(--edge);
   transition:transform .12s ease,box-shadow .12s ease}
 /* the two white ears, folded down from the top corners */
@@ -543,14 +543,15 @@ body[data-side="kid"] .pr.p,body[data-side="kid"] .pr.b{color:color-mix(in srgb,
 .kt-face{width:80px;height:80px;border-radius:50%;display:grid;place-items:center;background:#fff;color:var(--kc);border:var(--line-w) solid var(--edge);font:400 42px/1 var(--display)}
 .kt-name{font:400 clamp(24px,7vw,30px)/1.05 var(--display);-webkit-text-stroke:8px var(--edge);paint-order:stroke fill;overflow-wrap:anywhere;text-align:center}
 /* the tile's belly: what a kid checks before tapping in */
-.kt-info{align-self:stretch;display:grid;justify-items:center;gap:6px;margin-top:4px;padding:10px 12px 12px;background:#fff;color:#14101A;border:var(--line-w) solid var(--edge);border-radius:16px}
-.kt-bal{display:flex;align-items:center;gap:6px;font:400 clamp(24px,7vw,30px)/1 var(--display);font-variant-numeric:tabular-nums}
-.kt-bal .coin.mini{width:24px}
+/* the white box always sits inside the tile, with the tile's padding around it; the balance shrinks to fit it */
+.kt-info{align-self:stretch;justify-self:stretch;width:100%;min-width:0;box-sizing:border-box;container-type:inline-size;display:grid;justify-items:center;gap:6px;margin-top:4px;padding:10px 8px 12px;background:#fff;color:#14101A;border:var(--line-w) solid var(--edge);border-radius:16px}
+.kt-bal{display:flex;align-items:center;gap:.18em;white-space:nowrap;font:400 22px/1 var(--display);font-size:clamp(13px,calc(100cqi / (var(--balw,3.6) * 1.08)),30px);font-variant-numeric:tabular-nums}
+.kt-bal .coin.mini{width:.75em;flex:none}
 .kt-sub{font:500 13px/1.25 var(--body);color:#6B5C66;text-align:center}
 .kt-goal{width:100%;display:grid;gap:4px}
 .kt-goal .meter{height:12px;border-radius:7px;background:#fff;border:3px solid var(--edge)}
 .kt-goal .meter i{background:var(--kc)}
-.kt-line{display:flex;align-items:center;gap:5px;font:600 13px/1.2 var(--body);padding-top:6px;border-top:2px solid rgba(0,0,0,.1);width:100%;justify-content:center}
+.kt-line{display:flex;align-items:center;gap:5px;font:600 13px/1.2 var(--body);padding-top:6px;border-top:2px solid rgba(0,0,0,.1);width:100%;justify-content:center;text-align:center;text-wrap:balance}
 .kt-line svg{width:16px;height:16px;flex:none}
 .news{position:absolute;top:-14px;left:50%;transform:translateX(-50%) rotate(-4deg);z-index:2;padding:4px 12px;border-radius:999px;background:var(--gold);color:#000;border:var(--line-w) solid var(--edge);font:400 15px/1.2 var(--display);white-space:nowrap}
 .kidtile:active{transform:translateY(5px);box-shadow:0 1px 0 var(--edge)}
