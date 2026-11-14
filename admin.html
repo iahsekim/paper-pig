@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Paper Pig Admin</title>
+<meta name="theme-color" content="#FFF0F3" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0C1844" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titan+One&family=Fredoka:wght@400;500;600;700&display=swap">
+<!--
+  Paper Pig admin: how much each family uses the app. The numbers come from the database function
+  pp_admin_overview (supabase/schema.sql, "admin overview"), which only answers people listed in pp_admins.
+  It returns counts and dates, never what's inside (no kid names, jobs, books, notes or money amounts).
+-->
+<style>
+:root{
+  --pink:#FC3067; --pink-deep:#C70F48; --pink-soft:#FFE0E8;
+  --blue:#2F6BFF; --blue-deep:#1F4FD1; --blue-soft:#E1E9FF;
+  --gold:#FFC21A; --gold-soft:#FFF0C2; --green:#0E8A4F; --green-soft:#D7F5E5;
+  --edge:#000; --paper:#FFFFFF; --wash:#FFF0F3; --text:#14101A; --muted:#6B5C66; --rule:rgba(0,0,0,.12);
+  --bar:#2F6BFF; --bar-dim:#C9D7FF; --track:rgba(0,0,0,.06);
+  --display:"Titan One","Arial Rounded MT Bold",system-ui,sans-serif;
+  --body:"Fredoka","Nunito","Segoe UI",system-ui,sans-serif;
+  --pop:4px 4px 0 var(--edge); --line:3px solid var(--edge); --r:18px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --pink:#FF3D74; --pink-deep:#FF6F96; --pink-soft:#4A1638; --blue:#4B7FFF; --blue-deep:#8DB0FF; --blue-soft:#1C2E72;
+  --gold-soft:#4A3A0A; --green:#5FD69A; --green-soft:#103A2A;
+  --paper:#16245E; --wash:#0C1844; --text:#FFF4F7; --muted:#AEB8DC; --rule:rgba(255,255,255,.14);
+  --bar:#5B8CFF; --bar-dim:#2A3C80; --track:rgba(255,255,255,.07);
+}}
+:root[data-theme="dark"]{
+  --pink:#FF3D74; --pink-deep:#FF6F96; --pink-soft:#4A1638; --blue:#4B7FFF; --blue-deep:#8DB0FF; --blue-soft:#1C2E72;
+  --gold-soft:#4A3A0A; --green:#5FD69A; --green-soft:#103A2A;
+  --paper:#16245E; --wash:#0C1844; --text:#FFF4F7; --muted:#AEB8DC; --rule:rgba(255,255,255,.14);
+  --bar:#5B8CFF; --bar-dim:#2A3C80; --track:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--wash);color:var(--text);font:500 16px/1.4 var(--body);padding:env(safe-area-inset-top,0) 0 40px}
+[hidden]{display:none!important}
+button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+h1,h2,h3{font-family:var(--display);font-weight:400;margin:0;letter-spacing:.01em;text-wrap:balance}
+p,.tile span,.tile em,.emails,.chart-h p{text-wrap:pretty}
+.gate p{text-wrap:balance}
+
+/* header */
+.top{display:flex;align-items:center;gap:12px;padding:18px 0 14px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;min-width:0}
+.brand img{width:44px;height:44px;border-radius:12px;border:var(--line);box-shadow:3px 3px 0 var(--edge);flex:none}
+.brand h1{font-size:26px;line-height:1}
+.brand h1 small{display:block;font:600 13px/1.2 var(--body);color:var(--muted);margin-top:4px;letter-spacing:0}
+.who{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.who .me{font-size:14px;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* buttons */
+.btn{appearance:none;border:var(--line);background:var(--paper);border-radius:999px;padding:7px 16px;font-weight:600;cursor:pointer;box-shadow:3px 3px 0 var(--edge);transition:transform .08s,box-shadow .08s;white-space:nowrap}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--edge)}
+.btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--edge)}
+.btn.go{background:var(--pink);color:#fff}
+.btn:disabled{opacity:.55;cursor:default;transform:none}
+.link{appearance:none;border:0;background:none;padding:0;color:var(--blue-deep);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* cards */
+.card{background:var(--paper);border:var(--line);border-radius:var(--r);box-shadow:var(--pop)}
+.gate{max-width:440px;margin:8vh auto 0;padding:26px 24px 24px;text-align:center}
+.gate img{width:72px;height:72px;border-radius:18px;border:var(--line);box-shadow:3px 3px 0 var(--edge)}
+.gate h2{font-size:28px;margin:14px 0 6px}
+.gate p{margin:0 0 16px;color:var(--muted)}
+.gate form{display:grid;gap:10px}
+.gate input{width:100%;border:var(--line);border-radius:14px;padding:12px 14px;background:var(--paper);font-size:18px}
+.gate input.code{text-align:center;letter-spacing:8px;font-size:26px;font-weight:700}
+.gate .err{color:var(--pink-deep);font-weight:600;min-height:1.4em;margin:2px 0 0}
+.gate pre{text-align:left;white-space:pre-wrap;word-break:break-word;background:var(--wash);border:2px solid var(--rule);border-radius:12px;padding:10px 12px;font:500 13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 0 14px}
+
+/* summary tiles */
+.tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin:6px 0 18px}
+.tile{padding:14px 16px 13px}
+.tile b{display:block;font:400 38px/1 var(--display);font-variant-numeric:tabular-nums}
+.tile span{display:block;font-weight:600;margin-top:6px;line-height:1.2}
+.tile em{display:block;font-style:normal;color:var(--muted);font-size:14px;margin-top:2px}
+
+/* weekly chart */
+.chart{padding:16px 18px 12px;margin-bottom:18px}
+.chart-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.chart-h h2{font-size:20px}
+.chart-h p{margin:0;color:var(--muted);font-size:14px}
+.plot{position:relative;height:190px;margin:4px 0 0 30px}
+.grid{position:absolute;inset:0 0 26px 0;pointer-events:none}
+.grid i{position:absolute;left:0;right:0;border-top:1px solid var(--rule)}
+.grid i span{position:absolute;right:calc(100% + 8px);top:-9px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bars{position:absolute;inset:0;display:flex;gap:2px}
+.col{flex:1;display:flex;flex-direction:column;align-items:stretch;min-width:0;cursor:default;position:relative}
+.col .stack{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:0 12%}
+.col .b{width:100%;max-width:46px;background:var(--bar);border-radius:4px 4px 0 0;min-height:0;position:relative}
+.col .b.zero{background:none}
+.col .val{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+.col .x{height:26px;line-height:26px;text-align:center;font-size:12px;color:var(--muted);white-space:nowrap;display:flex;justify-content:center}
+.col:hover .b,.col:focus-visible .b{filter:brightness(1.12)}
+.col:hover .x,.col:focus-visible .x{color:var(--text);font-weight:600}
+.tip{position:fixed;z-index:20;pointer-events:none;background:var(--paper);border:var(--line);border-radius:12px;box-shadow:3px 3px 0 var(--edge);padding:8px 11px;font-size:14px;line-height:1.35;max-width:240px}
+.tip b{display:block}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}
+.search{flex:1 1 220px;min-width:0;border:var(--line);border-radius:999px;padding:8px 16px;background:var(--paper)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{appearance:none;border:var(--line);background:var(--paper);border-radius:999px;padding:6px 13px;font-weight:600;cursor:pointer;font-size:15px}
+.chip i{font-style:normal;color:var(--muted);margin-left:4px;font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--edge);color:#fff}
+.chip[aria-pressed="true"] i{color:rgba(255,255,255,.7)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .chip[aria-pressed="true"]{background:#fff;color:#000} :root:not([data-theme="light"]) .chip[aria-pressed="true"] i{color:rgba(0,0,0,.6)}}
+.opts{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-left:auto}
+.check{display:flex;align-items:center;gap:7px;font-weight:600;cursor:pointer;white-space:nowrap}
+.check input{width:18px;height:18px;accent-color:var(--pink)}
+.sortsel{display:none;border:var(--line);border-radius:999px;padding:6px 12px;background:var(--paper);font-weight:600}
+
+/* family table */
+.list{overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead th{text-align:left;font-size:13px;color:var(--muted);font-weight:600;padding:12px 10px 10px;border-bottom:var(--line);white-space:nowrap;vertical-align:bottom}
+thead th.n{text-align:right}
+thead button{appearance:none;border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer}
+thead button[aria-sort]{color:var(--text)}
+thead button[aria-sort="descending"]::after{content:" ↓"} thead button[aria-sort="ascending"]::after{content:" ↑"}
+tbody tr.fam{cursor:pointer}
+tbody tr.fam td{padding:11px 10px;border-top:1px solid var(--rule);vertical-align:middle}
+tbody tr.fam:first-child td{border-top:0}
+tbody tr.fam:hover td{background:color-mix(in srgb,var(--wash) 60%,transparent)}
+tbody tr.fam[aria-expanded="true"] td{background:color-mix(in srgb,var(--blue-soft) 55%,transparent)}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td .sub{display:block;font-size:13px;color:var(--muted);font-weight:500}
+.fname{font-weight:700;font-size:17px;line-height:1.2;overflow-wrap:anywhere}
+.emails{font-size:13px;color:var(--muted);overflow-wrap:anywhere;margin-top:2px}
+.you{display:inline-block;font:700 11px/1 var(--body);text-transform:uppercase;letter-spacing:.06em;background:var(--gold);color:#000;border:2px solid var(--edge);border-radius:999px;padding:3px 7px 2px;margin-left:6px;vertical-align:2px}
+.pill{display:inline-flex;align-items:center;gap:6px;border:2px solid var(--edge);border-radius:999px;padding:3px 10px 3px 8px;font-size:13px;font-weight:700;white-space:nowrap;background:var(--paper)}
+.pill::before{content:"";width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+.pill.week{background:var(--green-soft);color:var(--green)} .pill.week span{color:var(--text)}
+.pill.month{background:var(--gold-soft);color:#B07D00} .pill.month span{color:var(--text)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pill.month{color:var(--gold)}}
+.pill.quiet{color:var(--muted)} .pill.quiet span{color:var(--text)}
+.pill.never{color:var(--muted);background:transparent;border-style:dashed} .pill.never span{color:var(--text)}
+.pill.notset{color:var(--pink-deep);background:var(--pink-soft)} .pill.notset span{color:var(--text)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:30px;width:120px}
+.spark i{flex:1;background:var(--bar);border-radius:2px 2px 0 0;min-height:2px}
+.spark i.z{background:var(--track)}
+.none{color:var(--muted);opacity:.7}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+
+/* family detail */
+tr.more td{padding:0 10px 16px;background:color-mix(in srgb,var(--blue-soft) 55%,transparent)}
+.detail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.box{background:var(--paper);border:2px solid var(--edge);border-radius:14px;padding:11px 13px}
+.box h3{font:700 13px/1.2 var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 7px}
+.box dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:3px 10px;font-size:15px}
+.box dt{color:var(--muted)} .box dd{margin:0;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.box.wide{grid-column:span 2}
+.parent{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--rule);font-size:15px;flex-wrap:wrap}
+.parent:first-of-type{border-top:0;padding-top:0}
+.parent b{overflow-wrap:anywhere}
+.parent span{color:var(--muted);font-size:14px}
+.foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;color:var(--muted);font-size:14px;margin-top:14px}
+.status{padding:40px 16px;text-align:center;color:var(--muted);font-weight:600}
+
+/* narrower screens: the table becomes cards */
+@media (max-width:1060px){
+  .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .detail{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:860px){
+  .sortsel{display:block}
+  .list{background:none;border:0;box-shadow:none;overflow:visible}
+  table,tbody{display:block}
+  thead{display:none}
+  tbody tr.fam{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;background:var(--paper);border:var(--line);border-radius:var(--r);box-shadow:var(--pop);padding:14px 14px 12px;margin-bottom:14px}
+  tbody tr.fam[aria-expanded="true"]{border-radius:var(--r) var(--r) 0 0;margin-bottom:0;box-shadow:none}
+  tbody tr.fam td{display:block;padding:0;border:0!important;background:none!important;text-align:left}
+  tbody tr.fam td[data-k]::before{content:attr(data-k);display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:1px}
+  td.c-fam{grid-column:1 / 3}
+  td.c-status{grid-column:3;justify-self:end;align-self:start}
+  td.c-spark{grid-column:2 / -1;align-self:end}
+  .spark{width:100%;height:36px}
+  td .sub.inl{display:inline;margin-left:4px}
+  tr.more{display:block;background:var(--paper);border:var(--line);border-top:0;border-radius:0 0 var(--r) var(--r);box-shadow:var(--pop);margin-bottom:14px}
+  tr.more td{display:block;padding:12px;background:color-mix(in srgb,var(--blue-soft) 45%,transparent);border-radius:0 0 calc(var(--r) - 3px) calc(var(--r) - 3px)}
+}
+@media (max-width:560px){
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tile b{font-size:32px}
+  .detail{grid-template-columns:1fr}
+  .box.wide{grid-column:auto}
+  .brand h1{font-size:22px}
+  .who .me{display:none}
+  .who{margin-left:auto}
+  .who .btn{padding:6px 12px;font-size:14px}
+  .brand img{width:38px;height:38px}
+  .plot{height:160px;margin-left:24px}
+  .col .x{font-size:10px}
+  .opts{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><img src="icon-192.png" alt=""><h1>Paper Pig <small>Admin · usage by family</small></h1></div>
+    <div class="who" id="who" hidden><span class="me" id="me"></span><button class="btn" id="refresh" type="button">Refresh</button><button class="btn" id="out" type="button">Sign out</button></div>
+  </header>
+
+  <!-- signed out -->
+  <section class="card gate" id="signin" hidden>
+    <img src="icon-192.png" alt="">
+    <h2>Admin sign-in</h2>
+    <p id="signinLead">Use the email you sign in to Paper Pig with.</p>
+    <form id="emailForm" autocomplete="on">
+      <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+      <button class="btn go" type="submit">Send my code</button>
+    </form>
+    <form id="codeForm" hidden>
+      <input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="10" placeholder="123456" required>
+      <button class="btn go" type="submit">Sign in</button>
+      <button class="link" id="backEmail" type="button">Use a different email</button>
+    </form>
+    <p class="err" id="signinErr" role="alert"></p>
+  </section>
+
+  <!-- signed in, but not on the admin list (or the database part isn't there yet) -->
+  <section class="card gate" id="denied" hidden>
+    <img src="icon-192.png" alt="">
+    <h2 id="deniedH">Not an admin</h2>
+    <p id="deniedP"></p>
+    <pre id="deniedSql" hidden></pre>
+    <button class="btn" id="out2" type="button">Sign out</button>
+  </section>
+
+  <div class="status" id="loading">Loading…</div>
+
+  <main id="dash" hidden>
+    <section class="tiles" id="tiles" aria-label="Totals"></section>
+
+    <section class="card chart" aria-labelledby="chartH">
+      <div class="chart-h"><h2 id="chartH">Families using it each week</h2><p>A family counts when anyone in it does something in the app that week. Hover a week for the number that joined.</p></div>
+      <div class="plot" id="plot"></div>
+    </section>
+
+    <div class="controls">
+      <input class="search" id="search" type="search" placeholder="Search a family name or email" aria-label="Search families">
+      <div class="chips" id="chips" role="group" aria-label="Show"></div>
+      <div class="opts">
+        <label class="check"><input type="checkbox" id="hideMine"> Leave out my family</label>
+        <select class="sortsel" id="sortSel" aria-label="Sort by"></select>
+      </div>
+    </div>
+
+    <section class="card list">
+      <table>
+        <thead><tr id="headRow"></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+
+    <div class="foot"><span id="stamp"></span><button class="btn" id="csv" type="button">Download CSV</button></div>
+  </main>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script src="config.js?v=20261021b"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<script>
+(() => {
+'use strict';
+const CFG = window.CHORE_JAR_CONFIG || {};
+// The same sign-in as the app: signed in to Paper Pig in this browser means signed in here.
+const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = n => Number(n || 0).toLocaleString('en-US');
+const store = { get(k, d) { try { const v = localStorage.getItem('pp-admin-' + k); return v === null ? d : JSON.parse(v) } catch (_) { return d } }, set(k, v) { try { localStorage.setItem('pp-admin-' + k, JSON.stringify(v)) } catch (_) { } } };
+
+const S = { data: null, filter: store.get('filter', 'all'), sort: store.get('sort', 'last_active'), dir: store.get('dir', 'desc'), q: '', hideMine: store.get('hideMine', false), open: new Set(), email: '' };
+
+// ---------------------------------------------------------------- dates
+const DAY = 864e5;
+const parseD = s => s ? new Date(s) : null;
+const shortDate = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+const fullDate = d => d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+function ago(s) {
+  const d = parseD(s); if (!d) return '—';
+  const mins = (Date.now() - d) / 6e4;
+  if (mins < 2) return 'Just now';
+  if (mins < 60) return Math.round(mins) + ' min ago';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (d >= today) return Math.round(mins / 60) + ' hr ago';
+  const days = Math.ceil((today - d) / DAY);
+  if (days <= 1) return 'Yesterday';
+  if (days < 7) return days + ' days ago';
+  return shortDate(d);
+}
+const when = s => { const d = parseD(s); return d ? `<span title="${esc(fullDate(d))}">${ago(s)}</span>` : '<span class="none">—</span>' };
+const weekLabel = w => { const [y, m, d] = String(w).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
+
+// ---------------------------------------------------------------- status
+const STATUS = {
+  week:   { label: 'This week',  rank: 0, tip: 'Did something in the app in the last 7 days' },
+  month:  { label: 'This month', rank: 1, tip: 'Last activity 8 to 30 days ago' },
+  quiet:  { label: 'Quiet',      rank: 2, tip: 'Nothing in the last 30 days' },
+  never:  { label: 'Never used', rank: 3, tip: 'Set up kids but hasn’t used it yet' },
+  notset: { label: 'Not set up', rank: 4, tip: 'Signed up but added no kids' },
+};
+const statusOf = f => !f.kids ? 'notset' : f.actions7 > 0 ? 'week' : f.actions30 > 0 ? 'month' : f.actions > 0 ? 'quiet' : 'never';
+const FILTERS = [['all', 'All'], ['week', 'This week'], ['month', 'This month'], ['quiet', 'Quiet'], ['notset', 'Not set up']];
+const inFilter = (f, k) => k === 'all' || (k === 'quiet' ? ['quiet', 'never'].includes(f._s) : f._s === k);
+
+// ---------------------------------------------------------------- columns
+const tval = s => s ? Date.parse(s) : 0;
+const COLS = [
+  { k: 'name', label: 'Family', sort: f => (f.name || '').toLowerCase(), dir: 'asc', cls: 'c-fam' },
+  { k: 'status', label: 'Status', sort: f => STATUS[f._s].rank, dir: 'asc', cls: 'c-status' },
+  { k: 'last_active', label: 'Last used', sort: f => tval(f.last_active), mobile: 'Last used' },
+  { k: 'last_seen', label: 'Last opened', sort: f => tval(f.last_seen), mobile: 'Last opened' },
+  { k: 'kids', label: 'Kids', n: 1, sort: f => f.kids, mobile: 'Kids' },
+  { k: 'jobs_done', label: 'Jobs done', n: 1, sort: f => f.jobs_done, mobile: 'Jobs done' },
+  { k: 'reading_minutes', label: 'Reading', n: 1, sort: f => f.reading_minutes, mobile: 'Reading' },
+  { k: 'screen_minutes', label: 'Screens', n: 1, sort: f => f.screen_minutes, mobile: 'Screens' },
+  { k: 'days30', label: 'Days used', n: 1, sort: f => f.days30, mobile: 'Days used (30)' },
+  { k: 'actions', label: 'Last 12 weeks', sort: f => f.actions12, cls: 'c-spark' },
+  { k: 'created_at', label: 'Joined', sort: f => tval(f.created_at), hidden: true },
+];
+const col = k => COLS.find(c => c.k === k) || COLS[2];
+
+// ---------------------------------------------------------------- sign-in
+function show(id) { for (const x of ['signin', 'denied', 'dash', 'loading']) $(x).hidden = x !== id; $('who').hidden = !(id === 'dash'); }
+const errMsg = e => (e && (e.message || e.error_description)) || String(e || 'Something went wrong');
+
+$('emailForm').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('email').value.trim(), btn = e.submitter || $('emailForm').querySelector('button');
+  if (!email) return;
+  $('signinErr').textContent = ''; btn.disabled = true;
+  // shouldCreateUser: false — this page never makes new accounts.
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.origin + '/admin' } });
+  btn.disabled = false;
+  if (error) { $('signinErr').textContent = /signup|not allowed|not found/i.test(error.message) ? 'No Paper Pig account uses that email.' : errMsg(error); return; }
+  S.email = email;
+  $('emailForm').hidden = true; $('codeForm').hidden = false;
+  $('signinLead').textContent = `We sent a code to ${email}. Type it here, or tap the link in the email.`;
+  $('code').focus();
+};
+$('codeForm').onsubmit = async e => {
+  e.preventDefault();
+  const token = $('code').value.replace(/\D/g, ''), btn = e.submitter || $('codeForm').querySelector('button[type=submit]');
+  if (token.length < 6) { $('signinErr').textContent = 'Type the code from the email.'; return; }
+  $('signinErr').textContent = ''; btn.disabled = true;
+  const { error } = await sb.auth.verifyOtp({ email: S.email, token, type: 'email' });
+  btn.disabled = false;
+  if (error) { $('signinErr').textContent = /expired|invalid/i.test(error.message) ? 'That code didn’t work. Check it, or send a new one.' : errMsg(error); return; }
+  load();
+};
+$('backEmail').onclick = () => { $('codeForm').hidden = true; $('emailForm').hidden = false; $('signinErr').textContent = ''; $('signinLead').textContent = 'Use the email you sign in to Paper Pig with.' };
+const signOut = async () => { await sb.auth.signOut({ scope: 'local' }); S.data = null; show('signin'); };
+$('out').onclick = signOut; $('out2').onclick = signOut;
+$('refresh').onclick = () => load(true);
+
+// ---------------------------------------------------------------- load
+async function load(keepView) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { show('signin'); return; }
+  $('me').textContent = session.user.email || '';
+  if (!keepView) show('loading');
+  $('refresh').disabled = true;
+  const { data, error } = await sb.rpc('pp_admin_overview');
+  $('refresh').disabled = false;
+  if (error) {
+    const missing = error.code === 'PGRST202' || /could not find the function|does not exist/i.test(error.message);
+    $('deniedH').textContent = missing ? 'One step left' : 'Not an admin';
+    $('deniedP').innerHTML = missing
+      ? 'The admin part of the database isn’t there yet. In Supabase, open <b>SQL Editor</b>, paste all of <b>supabase/schema.sql</b> and click <b>Run</b>. Then add yourself with the line below and refresh this page.'
+      : error.code === '42501' || /admin/i.test(error.message)
+        ? `<b>${esc(session.user.email)}</b> isn’t on the admin list. To add it, run this once in Supabase → <b>SQL Editor</b>, then refresh:`
+        : esc(errMsg(error));
+    const sql = `insert into public.pp_admins (user_id)\n  select id from auth.users where email = '${String(session.user.email).replace(/'/g, "''")}'\n  returning user_id;`;
+    $('deniedSql').textContent = sql; $('deniedSql').hidden = !(missing || error.code === '42501' || /admin/i.test(error.message));
+    show('denied');
+    return;
+  }
+  S.data = prep(data);
+  show('dash');
+  render();
+}
+
+function prep(d) {
+  const fams = (d.families || []).map(f => {
+    const weekly = (f.weekly || []).map(Number);
+    return { ...f, weekly, actions12: weekly.reduce((a, b) => a + b, 0), _s: statusOf(f), _emails: (f.parents || []).map(p => p.email || '').join(' ').toLowerCase() };
+  });
+  return { ...d, families: fams, weeks: d.weeks || [] };
+}
+
+// ---------------------------------------------------------------- render
+function visible() {
+  return S.data.families.filter(f => !(S.hideMine && f.mine));
+}
+function render() {
+  const all = visible();
+  renderTiles(all);
+  renderChart(all);
+  renderControls(all);
+  renderTable(all);
+  const g = parseD(S.data.generated_at);
+  $('stamp').textContent = `Counts and dates only. Updated ${g ? g.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''}.`;
+}
+
+function renderTiles(all) {
+  const n = all.length, pct = x => n ? Math.round(100 * x / n) + '% of families' : '';
+  const setUp = all.filter(f => f.kids > 0).length;
+  const wk = all.filter(f => f.actions7 > 0).length, mo = all.filter(f => f.actions30 > 0).length;
+  const new7 = all.filter(f => Date.now() - tval(f.created_at) < 7 * DAY).length, new30 = all.filter(f => Date.now() - tval(f.created_at) < 30 * DAY).length;
+  const kids = all.reduce((a, f) => a + f.kids, 0), parents = all.reduce((a, f) => a + (f.parents || []).length, 0);
+  const devices = all.reduce((a, f) => a + f.alert_devices, 0);
+  const T = [
+    [num(n), 'Families', `${num(setUp)} added kids`],
+    [num(wk), 'Used it this week', pct(wk)],
+    [num(mo), 'Used it this month', pct(mo)],
+    [num(new7), 'New this week', `${num(new30)} in 30 days`],
+    [num(kids), 'Kids', `${num(parents)} parents and guardians`],
+    [num(devices), 'Timer alert devices', `in ${num(all.filter(f => f.alert_devices > 0).length)} families`],
+  ];
+  $('tiles').innerHTML = T.map(([b, s, e]) => `<div class="card tile"><b>${b}</b><span>${s}</span><em>${esc(e)}</em></div>`).join('');
+}
+
+function renderChart(all) {
+  const weeks = S.data.weeks;
+  const active = weeks.map((_, i) => all.filter(f => f.weekly[i] > 0).length);
+  const joined = weeks.map(w => all.filter(f => f.joined_week === w).length);
+  const max = Math.max(1, ...active);
+  const step = max <= 4 ? 1 : max <= 10 ? 2 : Math.ceil(max / 4 / 5) * 5;
+  const top = Math.max(step, Math.ceil(max / step) * step);
+  const lines = []; for (let v = 0; v <= top; v += step) lines.push(v);
+  const last = active.length - 1, peak = active.indexOf(Math.max(...active));
+  const colW = ($('plot').clientWidth || 600) / weeks.length, every = colW >= 70 ? 1 : colW >= 40 ? 2 : colW >= 26 ? 3 : 4;
+  // the grid and the bars share the area above the week labels, so 0 sits on the bottom line
+  $('plot').innerHTML =
+    `<div class="grid">${lines.map(v => `<i style="bottom:${(v / top) * 100}%"><span>${v}</span></i>`).join('')}</div>` +
+    `<div class="bars">${weeks.map((w, i) => {
+      const h = (active[i] / top) * 100;
+      const label = i === last || (i === peak && active[i] > 0) ? `<span class="val">${active[i]}</span>` : '';
+      const tip = `Week of ${weekLabel(w)}|${active[i]} ${active[i] === 1 ? 'family' : 'families'} used it|${joined[i]} joined`;
+      return `<div class="col" tabindex="0" data-tip="${esc(tip)}" aria-label="${esc(tip.replaceAll('|', ', '))}"><div class="stack"><div class="b${active[i] ? '' : ' zero'}" style="height:${h}%">${label}</div></div><div class="x">${(last - i) % every === 0 ? weekLabel(w) : ''}</div></div>`;
+    }).join('')}</div>`;
+}
+
+function renderControls(all) {
+  $('chips').innerHTML = FILTERS.map(([k, l]) => `<button class="chip" type="button" data-f="${k}" aria-pressed="${S.filter === k}">${l}<i>${num(all.filter(f => inFilter(f, k)).length)}</i></button>`).join('');
+  $('hideMine').checked = S.hideMine;
+  $('sortSel').innerHTML = COLS.filter(c => c.k !== 'status').map(c => `<option value="${c.k}" ${S.sort === c.k ? 'selected' : ''}>Sort: ${c.k === 'actions' ? 'Most active (12 weeks)' : c.k === 'created_at' ? 'Newest' : c.label}</option>`).join('');
+  $('headRow').innerHTML = COLS.filter(c => !c.hidden).map(c => `<th class="${c.n ? 'n' : ''}" scope="col"><button type="button" data-s="${c.k}" ${S.sort === c.k ? `aria-sort="${S.dir === 'asc' ? 'ascending' : 'descending'}"` : ''}>${c.label}</button></th>`).join('');
+}
+
+function sorted(list) {
+  const c = col(S.sort), m = S.dir === 'asc' ? 1 : -1;
+  return list.slice().sort((a, b) => { const x = c.sort(a), y = c.sort(b); return (x < y ? -1 : x > y ? 1 : 0) * m || tval(b.last_active) - tval(a.last_active) });
+}
+
+function spark(f) {
+  const mx = Math.max(5, ...f.weekly);
+  return `<div class="spark" role="img" aria-label="Actions per week, last 12 weeks: ${f.weekly.join(', ')}">${f.weekly.map((v, i) =>
+    `<i class="${v ? '' : 'z'}" style="height:${v ? Math.max(8, (v / mx) * 100) : 6}%" title="Week of ${weekLabel(S.data.weeks[i])}: ${v} ${v === 1 ? 'action' : 'actions'}"></i>`).join('')}</div>`;
+}
+const NONE = '<span class="none">—</span>';
+const mins = m => m >= 120 ? `${Math.floor(m / 60)} hr ${m % 60 ? (m % 60) + ' min' : ''}`.trim() : `${num(m)} min`;
+
+function renderTable(all) {
+  const q = S.q.trim().toLowerCase();
+  const list = sorted(all.filter(f => inFilter(f, S.filter) && (!q || (f.name || '').toLowerCase().includes(q) || f._emails.includes(q))));
+  if (!list.length) { $('rows').innerHTML = `<tr><td colspan="10" class="empty">${all.length ? 'No families match.' : 'No families yet.'}</td></tr>`; return; }
+  $('rows').innerHTML = list.map(f => {
+    const st = STATUS[f._s], open = S.open.has(f.id);
+    const emails = (f.parents || []).map(p => esc(p.email || '(no email)')).join(', ');
+    const row = `<tr class="fam" data-id="${esc(f.id)}" tabindex="0" aria-expanded="${open}">
+      <td class="c-fam"><div class="fname">${esc(f.name || 'Our family')}${f.mine ? '<span class="you">You</span>' : ''}</div><div class="emails">${emails}</div><span class="sub">Joined ${shortDate(new Date(f.created_at))}</span></td>
+      <td class="c-status"><span class="pill ${f._s}" title="${esc(st.tip)}"><span>${st.label}</span></span></td>
+      <td data-k="Last used">${when(f.last_active)}</td>
+      <td data-k="Last opened">${when(f.last_seen)}</td>
+      <td class="n" data-k="Kids">${f.kids ? num(f.kids) : NONE}</td>
+      <td class="n" data-k="Jobs done">${f.jobs_done ? num(f.jobs_done) : NONE}${f.jobs_waiting ? `<span class="sub">${num(f.jobs_waiting)} waiting</span>` : ''}</td>
+      <td class="n" data-k="Reading">${f.reading ? `${mins(f.reading_minutes)}<span class="sub">${num(f.reading)} ${f.reading === 1 ? 'session' : 'sessions'}</span>` : NONE}</td>
+      <td class="n" data-k="Screens">${f.screens ? `${mins(f.screen_minutes)}<span class="sub">${num(f.screens)} ${f.screens === 1 ? 'session' : 'sessions'}</span>` : NONE}</td>
+      <td class="n" data-k="Days used (30)">${f.days30 ? `${num(f.days30)}<span class="sub inl">of 30</span>` : NONE}</td>
+      <td class="c-spark">${spark(f)}</td>
+    </tr>`;
+    return row + (open ? `<tr class="more"><td colspan="10">${detail(f)}</td></tr>` : '');
+  }).join('');
+}
+
+function detail(f) {
+  const dl = rows => `<dl>${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
+  // a parent can type in time from before they signed up, so count from whichever came first
+  const start = Math.min(tval(f.created_at), f.first_active ? tval(f.first_active) : Infinity);
+  const monday = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d };
+  const sinceJoin = Math.max(1, Math.round((monday(Date.now()) - monday(start)) / (7 * DAY)) + 1); // calendar weeks, Monday to Sunday, like the app
+  const parents = (f.parents || []).map(p => `<div class="parent"><b>${esc(p.email || '(no email)')}</b><span>Joined ${p.joined ? shortDate(new Date(p.joined)) : '—'} · Opened ${ago(p.last_seen)} · Signed in ${ago(p.last_sign_in)}</span></div>`).join('');
+  return `<div class="detail">
+    <div class="box wide"><h3>Parents and guardians</h3>${parents || '<span class="sub">None</span>'}${f.invites ? `<div class="parent"><span>${num(f.invites)} ${f.invites === 1 ? 'invite' : 'invites'} not accepted yet</span></div>` : ''}</div>
+    <div class="box"><h3>Activity</h3>${dl([['All actions', num(f.actions)], ['Last 7 days', num(f.actions7)], ['Last 30 days', num(f.actions30)], ['Days used, last 7', num(f.days7)], ['Weeks used', `${num(f.weeks_used)} of ${num(sinceJoin)}`]])}</div>
+    <div class="box"><h3>Family</h3>${dl([['Joined', shortDate(new Date(f.created_at))], ['First action', f.first_active ? shortDate(new Date(f.first_active)) : '—'], ['Time zone', esc(f.timezone)], ['Kids', num(f.kids)], ['Timer alert devices', num(f.alert_devices)]])}</div>
+    <div class="box"><h3>Jobs and money</h3>${dl([['Jobs on the board', num(f.jobs_on_board)], ['Jobs done', num(f.jobs_done)], ['Waiting for OK', num(f.jobs_waiting)], ['Bonuses', num(f.bonuses)], ['Withdrawals', num(f.payouts)], ['Purchases', num(f.purchases)]])}</div>
+    <div class="box"><h3>Reading</h3>${dl([['Sessions', num(f.reading)], ['With the timer', num(f.reading_timed)], ['Typed in', num(f.reading - f.reading_timed)], ['Minutes', num(f.reading_minutes)]])}</div>
+    <div class="box"><h3>Screens</h3>${dl([['Sessions', num(f.screens)], ['On the clock', num(f.screens_timed)], ['Typed in', num(f.screens - f.screens_timed)], ['Minutes', num(f.screen_minutes)], ['Bonus minutes given', num(f.screen_bonuses) + (f.screen_bonuses === 1 ? ' time' : ' times')]])}</div>
+    <div class="box"><h3>Savings and jar</h3>${dl([['Savings goals', num(f.goals)], ['Money moves', num(f.savings_moves)], ['Savings locked', f.savings_locked ? 'Yes' : 'No'], ['Jar', f.jar_on ? 'On' : 'Off'], ['Jar entries', num(f.jar)]])}</div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------- events
+document.addEventListener('click', e => {
+  const chip = e.target.closest('[data-f]'); if (chip) { S.filter = chip.dataset.f; store.set('filter', S.filter); render(); return; }
+  const th = e.target.closest('[data-s]');
+  if (th) { const k = th.dataset.s; if (S.sort === k) S.dir = S.dir === 'asc' ? 'desc' : 'asc'; else { S.sort = k; S.dir = col(k).dir || 'desc'; } store.set('sort', S.sort); store.set('dir', S.dir); render(); return; }
+  const tr = e.target.closest('tr.fam'); if (tr && !e.target.closest('a,button')) toggle(tr.dataset.id);
+});
+document.addEventListener('keydown', e => { const tr = e.target.closest && e.target.closest('tr.fam'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(tr.dataset.id); } });
+function toggle(id) { S.open.has(id) ? S.open.delete(id) : S.open.add(id); renderTable(visible()); const tr = document.querySelector(`tr.fam[data-id="${CSS.escape(id)}"]`); if (tr) tr.focus({ preventScroll: true }); }
+$('search').oninput = e => { S.q = e.target.value; renderTable(visible()); };
+$('hideMine').onchange = e => { S.hideMine = e.target.checked; store.set('hideMine', S.hideMine); render(); };
+$('sortSel').onchange = e => { S.sort = e.target.value; S.dir = col(S.sort).dir || 'desc'; store.set('sort', S.sort); store.set('dir', S.dir); render(); };
+
+// chart tooltip
+const tip = $('tip');
+const showTip = (el, x, y) => { const [a, b, c] = el.dataset.tip.split('|'); tip.innerHTML = `<b>${esc(a)}</b>${esc(b)}<br>${esc(c)}`; tip.hidden = false; const r = tip.getBoundingClientRect(); tip.style.left = Math.min(innerWidth - r.width - 8, Math.max(8, x - r.width / 2)) + 'px'; tip.style.top = Math.max(8, y - r.height - 14) + 'px'; };
+document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.col[data-tip]'); if (c) showTip(c, e.clientX, e.clientY); else tip.hidden = true; });
+document.addEventListener('focusin', e => { const c = e.target.closest && e.target.closest('.col[data-tip]'); if (c) { const r = c.getBoundingClientRect(); showTip(c, r.left + r.width / 2, r.top + 40); } });
+document.addEventListener('focusout', () => { tip.hidden = true; });
+addEventListener('resize', () => { if (S.data && !$('dash').hidden) renderChart(visible()); });
+
+// CSV
+$('csv').onclick = () => {
+  const F = ['name', 'status', 'created_at', 'last_active', 'last_seen', 'kids', 'parents', 'invites', 'jobs_on_board', 'jobs_done', 'jobs_waiting', 'bonuses', 'payouts', 'purchases', 'reading', 'reading_timed', 'reading_minutes', 'screens', 'screens_timed', 'screen_minutes', 'screen_bonuses', 'goals', 'savings_moves', 'jar_on', 'jar', 'alert_devices', 'actions', 'actions7', 'actions30', 'days7', 'days30', 'weeks_used', 'timezone'];
+  // a family name that starts with = + - @ would run as a formula in a spreadsheet, so it gets a leading '
+  const cell = v => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s) && typeof v === 'string') s = "'" + s; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [F.join(',')].concat(sorted(visible()).map(f => F.map(k => cell(k === 'status' ? STATUS[f._s].label : k === 'parents' ? (f.parents || []).map(p => p.email).join('; ') : f[k])).join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+  a.download = `paper-pig-families-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+
+sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_IN' && !S.data && $('signin').hidden === false) load(); if (ev === 'SIGNED_OUT') { S.data = null; show('signin'); } });
+load();
+})();
+</script>
+</body>
+</html>

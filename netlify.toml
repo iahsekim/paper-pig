@@ -15,9 +15,21 @@
     Cache-Control = "no-cache"
 
 [[headers]]
+  for = "/admin*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-cache"
+
+[[headers]]
   for = "/config.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# paperpig.app/admin: the usage page for the person who runs Paper Pig
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
 
 [functions]
   directory = "netlify/functions"

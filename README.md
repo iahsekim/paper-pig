@@ -82,6 +82,22 @@ Check it's running: `select * from cron.job_run_details where command like '%pp_
 
 ---
 
+### 7. Admin page: usage by family
+
+`paperpig.app/admin` shows how much each family uses Paper Pig: who used it this week or this month, who went quiet, who never added kids, and per family the kids, jobs done, reading and screen minutes, days used, the last 12 weeks, and when a parent last opened the app. It shows counts and dates only, never kid names, job titles, books, explanations or money amounts (the privacy page says so). **Download CSV** saves the table.
+
+1. **Supabase → SQL Editor:** run `schema.sql` again (it adds the admin list and the function the page reads).
+2. Add yourself to the admin list, with the email you sign in to Paper Pig with:
+
+   ```sql
+   insert into public.pp_admins (user_id) select id from auth.users where email = 'you@example.com' returning user_id;
+   ```
+
+   It should return one row. To remove someone: `delete from public.pp_admins where user_id = (select id from auth.users where email = '...');`
+3. Open `/admin`. If you're signed in to Paper Pig in that browser, it opens right away; otherwise sign in with your email code. The page never creates accounts, and anyone not on the list sees "Not an admin" and no numbers.
+
+"Used it" means someone in the family did something in the app: a job or bonus, a withdrawal or purchase, a reading or screen session, bonus minutes, a jar entry, or a savings goal or move. "Last opened" comes from the sign-in renewing, which happens about once an hour while the app is open.
+
 ## How it works
 
 | Thing | Rule |
@@ -120,6 +136,7 @@ app.js                the app
 jobs.js               job ideas (58 jobs; the 15 marked on make the starter list)
 config.js             your Supabase URL/key, app name, Venmo + Cash App handles
 privacy.html          privacy page
+admin.html            usage by family, for the person who runs Paper Pig (/admin)
 supabase/schema.sql   database tables, security rules and functions
 netlify.toml          Netlify settings and security headers
 netlify/functions/    invite.js (invite emails), joined.js (new member alerts), feedback.js, ring.js (timer alerts)

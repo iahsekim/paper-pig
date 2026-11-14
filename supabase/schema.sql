@@ -591,3 +591,136 @@ do $$ begin
 exception when others then
   raise notice 'Timer alerts need Cron. Turn it on in Supabase (Integrations > Cron), then run this file again. (%)', sqlerrm;
 end $$;
+
+-- ---------------------------------------------------------------- admin overview (paperpig.app/admin)
+-- One page for the person who runs Paper Pig: how much each family uses the app. It returns counts and dates
+-- only, never what's inside (no kid names, job titles, books, explanations or money amounts). Only people listed
+-- in pp_admins can get it. Add yourself once in the SQL editor, with the email you sign in to Paper Pig with:
+--   insert into public.pp_admins (user_id) select id from auth.users where email = 'you@example.com' returning user_id;
+create table if not exists public.pp_admins (
+  user_id    uuid primary key references auth.users on delete cascade,
+  created_at timestamptz not null default now()
+);
+-- No policies: the app can't read or change this list. Only the SQL editor can.
+alter table public.pp_admins enable row level security;
+
+create or replace function public.pp_is_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (select 1 from public.pp_admins where user_id = auth.uid())
+$$;
+
+create or replace function public.pp_admin_overview()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  seen jsonb := '{}'; more jsonb; signin jsonb := '{}'; res jsonb;
+begin
+  if not public.pp_is_admin() then
+    raise exception 'Only a Paper Pig admin can see this.' using errcode = '42501';
+  end if;
+  -- When each parent last had the app open: a signed-in app renews its sign-in about once an hour while it's open.
+  begin
+    select coalesce(jsonb_object_agg(uid, at), '{}') into seen
+      from (select user_id::text as uid, max(updated_at) as at from auth.sessions group by 1) s;
+  exception when others then seen := '{}';
+  end;
+  begin
+    select coalesce(jsonb_object_agg(uid, at), '{}') into more
+      from (select user_id::text as uid, max(updated_at) as at from auth.refresh_tokens group by 1) s;
+    select coalesce(jsonb_object_agg(k, case when (seen ->> k) is null or (more ->> k)::timestamptz > (seen ->> k)::timestamptz then more -> k else seen -> k end), '{}')
+      into seen from (select jsonb_object_keys(seen || more) as k) ks;
+  exception when others then null;
+  end;
+  begin
+    select coalesce(jsonb_object_agg(id::text, last_sign_in_at), '{}') into signin from auth.users where last_sign_in_at is not null;
+  exception when others then signin := '{}';
+  end;
+
+  with fam as (
+    select f.*, case when exists (select 1 from pg_timezone_names z where z.name = f.timezone) then f.timezone else 'UTC' end as tz
+      from public.families f
+  ),
+  wks as (select (date_trunc('week', now() at time zone 'UTC')::date - i * 7) as w from generate_series(0, 11) i),
+  -- every action a family takes in the app, with when it happened
+  ev as (
+    select family_id, created_at as at from public.credits
+    union all select family_id, created_at from public.transactions
+    union all select family_id, started_at from public.reading_sessions
+    union all select family_id, started_at from public.screen_sessions
+    union all select family_id, created_at from public.screen_bonus
+    union all select family_id, created_at from public.penalties
+    union all select family_id, created_at from public.savings_moves
+    union all select family_id, created_at from public.savings_goals
+  ),
+  evl as (
+    select e.family_id, e.at, (e.at at time zone fam.tz)::date as d
+      from ev e join fam on fam.id = e.family_id
+     where e.at is not null and e.at <= now() + interval '1 day'
+  ),
+  agg as (
+    select family_id, max(at) as last_at, min(at) as first_at, count(*) as n,
+           count(*) filter (where at > now() - interval '7 days') as n7,
+           count(*) filter (where at > now() - interval '30 days') as n30,
+           count(distinct d) filter (where at > now() - interval '7 days') as days7,
+           count(distinct d) filter (where at > now() - interval '30 days') as days30,
+           count(distinct date_trunc('week', d)) as weeks_used
+      from evl group by family_id
+  ),
+  wkc as (select family_id, date_trunc('week', d)::date as w, count(*) as n from evl group by 1, 2),
+  kd as (select family_id, count(*) as n from public.kids group by 1),
+  jb as (select family_id, count(*) filter (where enabled and cardinality(kid_ids) > 0) as n from public.jobs group by 1),
+  cr as (select family_id, count(*) filter (where kind = 'job' and status = 'approved') as done,
+                count(*) filter (where kind = 'job' and status = 'pending') as waiting,
+                count(*) filter (where kind = 'bonus') as bonus from public.credits group by 1),
+  tx as (select family_id, count(*) filter (where kind = 'payout') as payouts, count(*) filter (where kind = 'purchase') as purchases from public.transactions group by 1),
+  rd as (select family_id, count(*) as n, count(*) filter (where source = 'timer') as timed, coalesce(sum(seconds), 0) / 60 as mins from public.reading_sessions group by 1),
+  sc as (select family_id, count(*) as n, count(*) filter (where source = 'clock') as timed, coalesce(sum(seconds), 0) / 60 as mins from public.screen_sessions group by 1),
+  sb as (select family_id, count(*) as n from public.screen_bonus group by 1),
+  pe as (select family_id, count(*) as n from public.penalties group by 1),
+  gl as (select family_id, count(*) filter (where not archived) as n from public.savings_goals group by 1),
+  mv as (select family_id, count(*) as n from public.savings_moves group by 1),
+  ps as (select family_id, count(*) as n from public.push_subs group by 1),
+  iv as (select family_id, count(*) as n from public.family_invites group by 1),
+  pa as (
+    select m.family_id, count(*) as n, bool_or(m.user_id = auth.uid()) as mine,
+           max((seen ->> m.user_id::text)::timestamptz) as last_seen,
+           jsonb_agg(jsonb_build_object('email', m.email, 'joined', m.created_at,
+             'last_sign_in', signin -> m.user_id::text, 'last_seen', seen -> m.user_id::text) order by m.created_at) as list
+      from public.family_members m group by 1
+  ),
+  rowz as (
+    select f.created_at, a.last_at, jsonb_build_object(
+      'id', f.id, 'name', f.name, 'created_at', f.created_at, 'timezone', f.tz,
+      'joined_week', date_trunc('week', (f.created_at at time zone f.tz)::date)::date,
+      'mine', coalesce(pa.mine, false), 'parents', coalesce(pa.list, '[]'), 'invites', coalesce(iv.n, 0),
+      'last_seen', pa.last_seen, 'last_active', a.last_at, 'first_active', a.first_at,
+      'actions', coalesce(a.n, 0), 'actions7', coalesce(a.n7, 0), 'actions30', coalesce(a.n30, 0),
+      'days7', coalesce(a.days7, 0), 'days30', coalesce(a.days30, 0), 'weeks_used', coalesce(a.weeks_used, 0),
+      'weekly', (select jsonb_agg(coalesce(c.n, 0) order by wks.w) from wks left join wkc c on c.family_id = f.id and c.w = wks.w),
+      'kids', coalesce(kd.n, 0), 'jobs_on_board', coalesce(jb.n, 0),
+      'jobs_done', coalesce(cr.done, 0), 'jobs_waiting', coalesce(cr.waiting, 0), 'bonuses', coalesce(cr.bonus, 0),
+      'payouts', coalesce(tx.payouts, 0), 'purchases', coalesce(tx.purchases, 0),
+      'reading', coalesce(rd.n, 0), 'reading_timed', coalesce(rd.timed, 0), 'reading_minutes', coalesce(rd.mins, 0),
+      'screens', coalesce(sc.n, 0), 'screens_timed', coalesce(sc.timed, 0), 'screen_minutes', coalesce(sc.mins, 0),
+      'screen_bonuses', coalesce(sb.n, 0), 'jar_on', f.penalty_enabled, 'jar', coalesce(pe.n, 0),
+      'goals', coalesce(gl.n, 0), 'savings_moves', coalesce(mv.n, 0), 'savings_locked', f.savings_locked,
+      'alert_devices', coalesce(ps.n, 0)
+    ) as j
+    from fam f
+    left join agg a on a.family_id = f.id left join kd on kd.family_id = f.id left join jb on jb.family_id = f.id
+    left join cr on cr.family_id = f.id left join tx on tx.family_id = f.id left join rd on rd.family_id = f.id
+    left join sc on sc.family_id = f.id left join sb on sb.family_id = f.id left join pe on pe.family_id = f.id
+    left join gl on gl.family_id = f.id left join mv on mv.family_id = f.id left join ps on ps.family_id = f.id
+    left join iv on iv.family_id = f.id left join pa on pa.family_id = f.id
+  )
+  select jsonb_build_object(
+    'generated_at', now(),
+    'weeks', (select jsonb_agg(w order by w) from wks),
+    'families', coalesce((select jsonb_agg(j order by last_at desc nulls last, created_at desc) from rowz), '[]')
+  ) into res;
+  return res;
+end $$;
+
+revoke all on function public.pp_is_admin() from public, anon;
+revoke all on function public.pp_admin_overview() from public, anon;
+grant execute on function public.pp_is_admin() to authenticated;
+grant execute on function public.pp_admin_overview() to authenticated;
