@@ -604,6 +604,15 @@ create table if not exists public.pp_admins (
 -- No policies: the app can't read or change this list. Only the SQL editor can.
 alter table public.pp_admins enable row level security;
 
+-- Emails sent from the admin page (the how-to email): who got which one, so nobody gets the same one twice.
+create table if not exists public.pp_email_log (
+  email      text not null check (char_length(email) <= 254),
+  kind       text not null check (char_length(kind) <= 40),
+  sent_at    timestamptz not null default now(),
+  primary key (email, kind)
+);
+alter table public.pp_email_log enable row level security;  -- no policies, like pp_admins
+
 create or replace function public.pp_is_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select auth.uid() is not null and exists (select 1 from public.pp_admins where user_id = auth.uid())
@@ -684,7 +693,8 @@ begin
     select m.family_id, count(*) as n, bool_or(m.user_id = auth.uid()) as mine,
            max((seen ->> m.user_id::text)::timestamptz) as last_seen,
            jsonb_agg(jsonb_build_object('email', m.email, 'joined', m.created_at,
-             'last_sign_in', signin -> m.user_id::text, 'last_seen', seen -> m.user_id::text) order by m.created_at) as list
+             'last_sign_in', signin -> m.user_id::text, 'last_seen', seen -> m.user_id::text,
+             'emailed', (select jsonb_object_agg(l.kind, l.sent_at) from public.pp_email_log l where l.email = lower(m.email))) order by m.created_at) as list
       from public.family_members m group by 1
   ),
   rowz as (
@@ -713,14 +723,31 @@ begin
     left join iv on iv.family_id = f.id left join pa on pa.family_id = f.id
   )
   select jsonb_build_object(
-    'generated_at', now(),
+    'generated_at', now(), 'email_log', true,
     'weeks', (select jsonb_agg(w order by w) from wks),
     'families', coalesce((select jsonb_agg(j order by last_at desc nulls last, created_at desc) from rowz), '[]')
   ) into res;
   return res;
 end $$;
 
+-- The how-to function (netlify/functions/howto.js) records who it emailed. Only an admin can, and only for
+-- addresses that belong to a parent on Paper Pig.
+create or replace function public.pp_admin_log_email(p_kind text, p_emails text[])
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.pp_is_admin() then raise exception 'Only a Paper Pig admin can do this.' using errcode = '42501'; end if;
+  insert into public.pp_email_log (email, kind)
+    select distinct lower(e), left(p_kind, 40) from unnest(p_emails) e
+     where exists (select 1 from public.family_members m where lower(m.email) = lower(e))
+    on conflict do nothing;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
 revoke all on function public.pp_is_admin() from public, anon;
+revoke all on function public.pp_admin_log_email(text, text[]) from public, anon;
+grant execute on function public.pp_admin_log_email(text, text[]) to authenticated;
 revoke all on function public.pp_admin_overview() from public, anon;
 grant execute on function public.pp_is_admin() to authenticated;
 grant execute on function public.pp_admin_overview() to authenticated;

@@ -167,12 +167,44 @@ tr.more td{padding:0 10px 16px;background:color-mix(in srgb,var(--blue-soft) 55%
 .foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;color:var(--muted);font-size:14px;margin-top:14px}
 .status{padding:40px 16px;text-align:center;color:var(--muted);font-weight:600}
 
+/* email panel */
+.scrim{position:fixed;inset:0;z-index:30;background:rgba(12,24,68,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow-y:auto}
+.sheet{width:100%;max-width:980px;padding:20px 20px 18px;position:relative}
+.sheet-h{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.sheet-h h2{font-size:24px;margin-right:auto}
+.xclose{appearance:none;border:var(--line);background:var(--paper);border-radius:50%;width:38px;height:38px;font-size:22px;line-height:1;cursor:pointer;box-shadow:2px 2px 0 var(--edge);flex:none}
+.hint{margin:0 0 14px;color:var(--muted);text-wrap:pretty}
+.mailgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:18px;align-items:start}
+.mailgrid h3{font:700 13px/1.2 var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ppl{border:2px solid var(--edge);border-radius:14px;max-height:420px;overflow-y:auto;background:var(--paper)}
+.ppl label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:9px 12px;border-top:1px solid var(--rule);cursor:pointer}
+.ppl label:first-child{border-top:0}
+.ppl input{width:18px;height:18px;accent-color:var(--pink)}
+.ppl b{font-weight:600;overflow-wrap:anywhere;font-size:15px}
+.ppl small{grid-column:2;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.ppl .pill{grid-row:1 / 3;grid-column:3}
+.ppl label.sent{opacity:.55;cursor:default}
+.ppl .none-left{padding:18px;text-align:center;color:var(--muted)}
+.selbar{display:flex;gap:12px;align-items:center;margin:8px 2px 0;font-size:14px;color:var(--muted);flex-wrap:wrap}
+.prevtabs{display:inline-flex;gap:6px;margin-left:auto}
+.prevtabs .chip{font-size:13px;padding:4px 10px;text-transform:none;letter-spacing:0}
+.prev{width:100%;height:520px;border:2px solid var(--edge);border-radius:14px;background:#FFF0F3;display:block}
+.subj{font-size:14px;margin:0 0 8px;color:var(--muted);overflow-wrap:anywhere} .subj b{color:var(--text)}
+.mailbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:var(--line)}
+.mailbar .btn.go{margin-left:auto}
+.mailbar .btn.sure{background:var(--edge);color:#fff}
+.msg{margin:10px 0 0;font-weight:600;min-height:1.4em;text-wrap:pretty}
+.msg.bad{color:var(--pink-deep)} .msg.good{color:var(--green)}
+body.locked{overflow:hidden}
+
 /* narrower screens: the table becomes cards */
 @media (max-width:1060px){
   .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
   .detail{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:860px){
+  .mailgrid{grid-template-columns:1fr}
+  .prev{height:460px}
   .sortsel{display:block}
   .list{background:none;border:0;box-shadow:none;overflow:visible}
   table,tbody{display:block}
@@ -202,6 +234,12 @@ tr.more td{padding:0 10px 16px;background:color-mix(in srgb,var(--blue-soft) 55%
   .plot{height:160px;margin-left:24px}
   .col .x{font-size:10px}
   .opts{margin-left:0}
+  .scrim{padding:10px 8px}
+  .ppl label{grid-template-columns:auto minmax(0,1fr)}
+  .ppl .pill{grid-row:auto;grid-column:2;justify-self:start;margin-top:2px}
+  .sheet{padding:16px 14px}
+  .mailbar .btn{flex:1 1 auto}
+  .mailbar .btn.go{margin-left:0}
 }
 </style>
 </head>
@@ -209,7 +247,7 @@ tr.more td{padding:0 10px 16px;background:color-mix(in srgb,var(--blue-soft) 55%
 <div class="wrap">
   <header class="top">
     <div class="brand"><img src="icon-192.png" alt=""><h1>Paper Pig <small>Admin · usage by family</small></h1></div>
-    <div class="who" id="who" hidden><span class="me" id="me"></span><button class="btn" id="refresh" type="button">Refresh</button><button class="btn" id="out" type="button">Sign out</button></div>
+    <div class="who" id="who" hidden><span class="me" id="me"></span><button class="btn go" id="mailOpen" type="button">Email families</button><button class="btn" id="refresh" type="button">Refresh</button><button class="btn" id="out" type="button">Sign out</button></div>
   </header>
 
   <!-- signed out -->
@@ -268,6 +306,29 @@ tr.more td{padding:0 10px 16px;background:color-mix(in srgb,var(--blue-soft) 55%
   </main>
 </div>
 <div class="tip" id="tip" hidden></div>
+
+<!-- Email families: the how-to email (netlify/functions/howto.js) -->
+<div class="scrim" id="mailScrim" hidden>
+  <section class="card sheet" role="dialog" aria-modal="true" aria-labelledby="mailH">
+    <div class="sheet-h"><h2 id="mailH">Email the how-to</h2><button class="xclose" id="mailClose" type="button" aria-label="Close">×</button></div>
+    <p class="hint">Each person gets their own email from <b id="mailFrom">Mike from Paper Pig</b>, and replies come to you. Nobody gets it twice, and your own family is left out.</p>
+    <div class="mailgrid">
+      <div>
+        <h3>Who gets it</h3>
+        <div class="chips" id="aud" role="group" aria-label="Who gets it" style="margin-bottom:10px"></div>
+        <div class="ppl" id="ppl"><div class="none-left">Loading…</div></div>
+        <div class="selbar"><span id="selCount"></span><button class="link" id="selAll" type="button">Select all</button><button class="link" id="selNone" type="button">Clear</button></div>
+      </div>
+      <div>
+        <h3>The email <span class="prevtabs" id="prevTabs"><button class="chip" type="button" data-pv="notset" aria-pressed="true">Not set up</button><button class="chip" type="button" data-pv="setup" aria-pressed="false">Set up</button></span></h3>
+        <p class="subj" id="mailSubj"></p>
+        <iframe class="prev" id="mailPrev" sandbox title="Email preview"></iframe>
+      </div>
+    </div>
+    <div class="mailbar"><button class="btn" id="mailTest" type="button">Send me a test</button><span class="sub" id="testTo"></span><button class="btn go" id="mailSend" type="button">Send</button></div>
+    <p class="msg" id="mailMsg" role="status"></p>
+  </section>
+</div>
 
 <script src="config.js?v=20261021b"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
@@ -503,7 +564,7 @@ function detail(f) {
   const start = Math.min(tval(f.created_at), f.first_active ? tval(f.first_active) : Infinity);
   const monday = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d };
   const sinceJoin = Math.max(1, Math.round((monday(Date.now()) - monday(start)) / (7 * DAY)) + 1); // calendar weeks, Monday to Sunday, like the app
-  const parents = (f.parents || []).map(p => `<div class="parent"><b>${esc(p.email || '(no email)')}</b><span>Joined ${p.joined ? shortDate(new Date(p.joined)) : '—'} · Opened ${ago(p.last_seen)} · Signed in ${ago(p.last_sign_in)}</span></div>`).join('');
+  const parents = (f.parents || []).map(p => `<div class="parent"><b>${esc(p.email || '(no email)')}</b><span>Joined ${p.joined ? shortDate(new Date(p.joined)) : '—'} · Opened ${ago(p.last_seen)} · Signed in ${ago(p.last_sign_in)}${p.emailed && p.emailed['howto-1'] ? ` · How-to sent ${shortDate(new Date(p.emailed['howto-1']))}` : ''}</span></div>`).join('');
   return `<div class="detail">
     <div class="box wide"><h3>Parents and guardians</h3>${parents || '<span class="sub">None</span>'}${f.invites ? `<div class="parent"><span>${num(f.invites)} ${f.invites === 1 ? 'invite' : 'invites'} not accepted yet</span></div>` : ''}</div>
     <div class="box"><h3>Activity</h3>${dl([['All actions', num(f.actions)], ['Last 7 days', num(f.actions7)], ['Last 30 days', num(f.actions30)], ['Days used, last 7', num(f.days7)], ['Weeks used', `${num(f.weeks_used)} of ${num(sinceJoin)}`]])}</div>
@@ -546,6 +607,91 @@ $('csv').onclick = () => {
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
   a.download = `paper-pig-families-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+
+// ---------------------------------------------------------------- email families (the how-to)
+const M = { people: [], aud: 'new', picked: new Set(), pv: 'notset', armed: null, busy: false };
+const AUD = [
+  ['new', 'Haven’t used it yet', p => p.status === 'never' || p.status === 'notset'],
+  ['notset', 'Not set up', p => p.status === 'notset'],
+  ['quiet', 'Nothing in 30 days', p => ['quiet', 'never', 'notset'].includes(p.status)],
+  ['all', 'Everyone', () => true],
+];
+async function howto(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Sign in again.');
+  const r = await fetch('/.netlify/functions/howto', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ({ admin: 'This account isn’t an admin.', signin: 'Sign in again.', schema: 'Run supabase/schema.sql again in Supabase: it adds the sent log.', not_configured: 'RESEND_API_KEY isn’t set in Netlify.' }[j.error]) || ('Something went wrong (' + r.status + ').'));
+  return j;
+}
+const mailMsg = (t, kind) => { $('mailMsg').textContent = t || ''; $('mailMsg').className = 'msg' + (kind ? ' ' + kind : ''); };
+function audPick() { const f = AUD.find(a => a[0] === M.aud)[2]; M.picked = new Set(M.people.filter(p => !p.sent && f(p)).map(p => p.email)); }
+function renderMail() {
+  const left = M.people.filter(p => !p.sent);
+  $('aud').innerHTML = AUD.map(([k, l, f]) => `<button class="chip" type="button" data-aud="${k}" aria-pressed="${M.aud === k}">${l}<i>${num(left.filter(f).length)}</i></button>`).join('');
+  const f = AUD.find(a => a[0] === M.aud)[2];
+  const shown = M.people.filter(f).sort((a, b) => (!!a.sent - !!b.sent) || STATUS[a.status].rank - STATUS[b.status].rank || a.family.localeCompare(b.family));
+  $('ppl').innerHTML = shown.length ? shown.map(p => `<label class="${p.sent ? 'sent' : ''}"><input type="checkbox" data-em="${esc(p.email)}" ${p.sent ? 'disabled' : M.picked.has(p.email) ? 'checked' : ''}><b>${esc(p.email)}</b><span class="pill ${p.status}"><span>${STATUS[p.status].label}</span></span><small>${esc(p.family)} · joined ${shortDate(new Date(p.joined))}${p.sent ? ` · <b>sent ${shortDate(new Date(p.sent))}</b>` : ''}</small></label>`).join('')
+    : '<div class="none-left">Nobody in this group.</div>';
+  const n = M.picked.size;
+  $('selCount').textContent = `${num(n)} selected`;
+  const sendB = $('mailSend');
+  sendB.disabled = !n || M.busy;
+  sendB.classList.toggle('sure', !!M.armed);
+  sendB.textContent = M.busy ? 'Sending…' : M.armed ? `Yes, send to ${num(n)} ${n === 1 ? 'person' : 'people'}` : `Send to ${num(n)} ${n === 1 ? 'person' : 'people'}`;
+  $('prevTabs').querySelectorAll('[data-pv]').forEach(b => b.setAttribute('aria-pressed', b.dataset.pv === M.pv));
+}
+async function loadPreview() {
+  try { const e = await howto({ action: 'preview', status: M.pv }); $('mailSubj').innerHTML = `Subject: <b>${esc(e.subject)}</b>`; $('mailPrev').srcdoc = e.html; if (e.from) $('mailFrom').textContent = e.from.replace(/\s*<.*$/, ''); }
+  catch (e) { $('mailSubj').textContent = ''; $('mailPrev').srcdoc = ''; mailMsg(e.message, 'bad'); }
+}
+async function openMail() {
+  $('mailScrim').hidden = false; document.body.classList.add('locked'); mailMsg('');
+  $('testTo').textContent = `to ${$('me').textContent}`;
+  M.armed = null; renderMail(); loadPreview();
+  try { const j = await howto({ action: 'list' }); M.people = j.people || []; audPick(); renderMail(); }
+  catch (e) { $('ppl').innerHTML = ''; mailMsg(e.message, 'bad'); }
+}
+function closeMail() { if (M.busy) return; $('mailScrim').hidden = true; document.body.classList.remove('locked'); M.armed = null; }
+$('mailOpen').onclick = openMail;
+$('mailClose').onclick = closeMail;
+$('mailScrim').addEventListener('click', e => { if (e.target === $('mailScrim')) closeMail(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('mailScrim').hidden) closeMail(); });
+$('mailScrim').addEventListener('click', e => {
+  const a = e.target.closest('[data-aud]'); if (a) { M.aud = a.dataset.aud; M.armed = null; audPick(); renderMail(); return; }
+  const v = e.target.closest('[data-pv]'); if (v) { M.pv = v.dataset.pv; renderMail(); loadPreview(); return; }
+});
+$('ppl').addEventListener('change', e => { const c = e.target.closest('[data-em]'); if (!c) return; c.checked ? M.picked.add(c.dataset.em) : M.picked.delete(c.dataset.em); M.armed = null; renderMail(); });
+$('selAll').onclick = () => { const f = AUD.find(a => a[0] === M.aud)[2]; M.people.filter(p => !p.sent && f(p)).forEach(p => M.picked.add(p.email)); M.armed = null; renderMail(); };
+$('selNone').onclick = () => { M.picked.clear(); M.armed = null; renderMail(); };
+$('mailTest').onclick = async () => {
+  const b = $('mailTest'); b.disabled = true; mailMsg('Sending a test…');
+  try { const j = await howto({ action: 'test', status: M.pv }); mailMsg(`Test sent to ${j.to}. Check your inbox (and spam, the first time).`, 'good'); }
+  catch (e) { mailMsg(e.message, 'bad'); }
+  b.disabled = false;
+};
+$('mailSend').onclick = async () => {
+  const n = M.picked.size; if (!n || M.busy) return;
+  // first tap asks, second tap sends
+  if (!M.armed) { M.armed = setTimeout(() => { M.armed = null; renderMail(); }, 6000); renderMail(); mailMsg(`This emails ${num(n)} ${n === 1 ? 'person' : 'people'} now. Tap again to send.`); return; }
+  clearTimeout(M.armed); M.armed = null; M.busy = true; renderMail();
+  let sent = 0, left = [...M.picked], err = null;
+  try {
+    while (left.length) {
+      mailMsg(`Sending… ${num(sent)} of ${num(n)}`);
+      const j = await howto({ action: 'send', emails: left });
+      sent += j.sent || 0;
+      const done = new Set(j.emails || []);
+      for (const p of M.people) if (done.has(p.email)) p.sent = new Date().toISOString();
+      left = left.filter(x => !done.has(x));
+      if (!j.sent || !j.left) break;
+    }
+  } catch (e) { err = e; }
+  M.busy = false; audPick(); renderMail();
+  if (err) mailMsg(`${sent ? `Sent to ${num(sent)}. ` : ''}${err.message}`, 'bad');
+  else mailMsg(`Sent to ${num(sent)} ${sent === 1 ? 'person' : 'people'}.${n - sent > 0 ? ` ${num(n - sent)} skipped (already sent).` : ''}`, 'good');
+  load(true);
 };
 
 sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_IN' && !S.data && $('signin').hidden === false) load(); if (ev === 'SIGNED_OUT') { S.data = null; show('signin'); } });

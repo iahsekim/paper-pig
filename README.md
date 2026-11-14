@@ -96,6 +96,8 @@ Check it's running: `select * from cron.job_run_details where command like '%pp_
    It should return one row. To remove someone: `delete from public.pp_admins where user_id = (select id from auth.users where email = '...');`
 3. Open `/admin`. If you're signed in to Paper Pig in that browser, it opens right away; otherwise sign in with your email code. The page never creates accounts, and anyone not on the list sees "Not an admin" and no numbers.
 
+**Email families** (top of the page) sends the how-to email (`netlify/functions/howto.js`, through Resend, from "Mike from Paper Pig" with replies to you): how to put Paper Pig on the home screen on iPhone and Android, how to set it up, how a week works, and timer alerts. Families who haven't added kids get an opening that says so. Pick a group (Haven't used it yet, Not set up, Nothing in 30 days, Everyone), untick anyone, read the email, **Send me a test**, then **Send** (it asks twice). Each person gets their own email, your own family is left out, and nobody gets it twice: the sent log (`pp_email_log`) remembers, and each parent's row shows when it went. Resend's free plan sends 100 emails a day; if you have more, send the rest the next day and everyone who already got it is skipped. To send a new version to everyone again, change `KIND` in `howto.js`.
+
 "Used it" means someone in the family did something in the app: a job or bonus, a withdrawal or purchase, a reading or screen session, bonus minutes, a jar entry, or a savings goal or move. "Last opened" comes from the sign-in renewing, which happens about once an hour while the app is open.
 
 ## How it works
@@ -139,7 +141,7 @@ privacy.html          privacy page
 admin.html            usage by family, for the person who runs Paper Pig (/admin)
 supabase/schema.sql   database tables, security rules and functions
 netlify.toml          Netlify settings and security headers
-netlify/functions/    invite.js (invite emails), joined.js (new member alerts), feedback.js, ring.js (timer alerts)
+netlify/functions/    invite.js (invite emails), joined.js (new member alerts), feedback.js, ring.js (timer alerts), howto.js (the how-to email from /admin)
 package.json          the one thing the functions need: web-push (Netlify installs it)
 tools/members-sheet.gs  Apps Script for the members Google Sheet
 ```
