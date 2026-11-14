@@ -6,7 +6,7 @@
 // their own email, and never the same person twice (pp_email_log). Your own family is left out.
 //
 // Environment variables in Netlify (already set for invites): RESEND_API_KEY.
-// Optional: HOWTO_FROM (default "Mike from Paper Pig <noreply@paperpig.app>"),
+// Optional: HOWTO_FROM (default "Mike from Paper Pig <mike@paperpig.app>": any address at paperpig.app sends, no inbox needed),
 //           HOWTO_REPLY_TO (where replies go; default: the email of the admin who sends it).
 //
 // POST, with the admin's sign-in token as "Authorization: Bearer ...", and one of:
@@ -20,7 +20,7 @@ const crypto = require('crypto');
 const SB_URL = process.env.SUPABASE_URL || 'https://wddbtkmtqunsbpfyzkxd.supabase.co';
 const SB_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_nvKmj2yOomzogvrTKwXVNw_jr6EZjSG';
 const SITE = (process.env.SITE_URL || 'https://paperpig.app').replace(/\/$/, '');
-const FROM = process.env.HOWTO_FROM || 'Mike from Paper Pig <noreply@paperpig.app>';
+const FROM = process.env.HOWTO_FROM || 'Mike from Paper Pig <mike@paperpig.app>';  // not noreply: the email asks people to reply
 const KIND = 'howto-1';     // change this to send a new version to everyone again
 const PER_CALL = 100;       // Resend sends up to 100 in one batch
 
