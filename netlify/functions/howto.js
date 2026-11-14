@@ -134,6 +134,9 @@ function build({ email, setup }) {
   const BOX = (title, inner) => `<div style="border:3px solid #000;border-radius:16px;padding:14px 16px 4px;margin:0 0 14px;background:#FFFFFF"><p style="margin:0 0 8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#C70F48">${title}</p>${inner}</div>`;
   const share = `<img src="${SITE}/email/share.png" width="18" height="18" alt="" style="vertical-align:-3px;border:0">`;
   const site = `<a href="${SITE}" style="color:#1F4FD1;font-weight:700">paperpig.app</a>`;
+  // two app screenshots side by side, each with a line under it (pictures from the demo family, not a real one)
+  const SHOT = (file, alt, cap, pad) => `<td width="50%" valign="top" style="padding:${pad}"><img src="${SITE}/email/${file}" width="236" alt="${esc(alt)}" style="display:block;width:100%;max-width:236px;height:auto;border:0;margin:0 auto"><p style="margin:8px 2px 0;font-size:14px;line-height:1.4;font-weight:600;color:#14101A;text-align:center">${tie(cap)}</p></td>`;
+  const ROW = (a, b) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 20px;border-collapse:collapse"><tr>${SHOT(...a, '0 6px 0 0')}${SHOT(...b, '0 0 0 6px')}</tr></table>`;
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(subject)}</title></head>
 <body style="margin:0;padding:0;background:#FFF0F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#14101A">
@@ -169,8 +172,16 @@ function build({ email, setup }) {
     ${UL([
       '<b>Allowance.</b> Every Monday, each kid’s allowance goes into their bank.',
       '<b>Jobs.</b> Your kid picks a job and taps <b>I did it</b>. You see it under <b>Needs your OK</b>. Tap <b>OK</b> and the money lands in their bank.',
+    ])}
+    ${ROW(['kid-did.jpg', 'A kid’s job in Paper Pig with an I did it button', 'Your kid picks a job and taps I did it.'],
+          ['parent-ok.jpg', 'The parent side of Paper Pig, with jobs waiting for an OK', 'You tap OK. The money lands in their bank.'])}
+    ${UL([
       '<b>Reading earns screen time.</b> Your kid starts the reading timer. Every minute read adds a screen minute that week, up to the limit you set.',
       '<b>Screen time.</b> On screen days, the screen clock counts down their minutes. It stops at zero, even if nobody has the app open.',
+    ])}
+    ${ROW(['kid-bank.jpg', 'A kid’s bank in Paper Pig, with a savings goal', 'What your kid sees: their bank and their savings goal.'],
+          ['kid-reading.jpg', 'The Paper Pig reading timer counting down', 'The reading timer counts down and rings when it is done.'])}
+    ${UL([
       '<b>Money out.</b> When you hand over cash or buy something with their money, record it. Every entry needs an explanation, so they always know where it went.',
       '<b>Saving.</b> Kids can set money aside for something they want, and watch it add up.',
     ])}
