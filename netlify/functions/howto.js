@@ -53,7 +53,6 @@ async function run(event) {
   const ov = await sb('/rest/v1/rpc/pp_admin_overview', {});
   if (!ov.ok) return json(403, { error: 'admin' });
   const data = await ov.json();
-  if (!data.email_log) return json(409, { error: 'schema', detail: 'Run supabase/schema.sql again: it adds the sent log.' });
 
   // everyone it could go to: one entry per parent/guardian email, your own family left out
   const people = new Map();
@@ -70,6 +69,8 @@ async function run(event) {
   if (m.action === 'preview') { const e = build({ email: 'parent@example.com', setup: m.status !== 'notset' }); return json(200, { subject: e.subject, html: e.html, text: e.text, from: FROM }) }
 
   if (!key) return json(503, { error: 'not_configured', detail: 'RESEND_API_KEY is not set in Netlify.' });
+  // Sending needs the sent log, so nobody gets it twice. Looking and previewing don't.
+  if (m.action === 'send' && !data.email_log) return json(409, { error: 'schema', detail: 'Run supabase/schema.sql again in Supabase: it adds the sent log, so nobody gets the email twice.' });
   const replyTo = process.env.HOWTO_REPLY_TO || me.email || undefined;
 
   if (m.action === 'test') {
