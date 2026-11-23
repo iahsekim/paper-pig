@@ -1,7 +1,7 @@
 /* Paper Pig service worker: makes the site installable and lets it open without a connection.
    Always asks the network first, so families get updates right away; the saved copy is only a fallback.
    Only this site's own files are kept. Sign-in, data (Supabase) and email are never cached. */
-const CACHE = 'paperpig-v5';
+const CACHE = 'paperpig-v6';
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/', '/index.html']).catch(() => { }))) });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())) });
 self.addEventListener('fetch', e => {

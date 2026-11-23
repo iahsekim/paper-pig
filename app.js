@@ -188,18 +188,50 @@ const MAXED = 'You’ve earned all your bonus screen time this week. This readin
 function readCheer(kid, before, after) { const earned = after - before, cap = Number(kid.reading_cap) || 0;
   return earned > 0 ? `+${earned} screen minute${earned > 1 ? 's' : ''} earned${after >= cap ? '. You maxed out your bonus this week!' : ''}` : cap > 0 && before >= cap ? 'Your screen bonus was already maxed, so this one was just for you. Nice reading!' : cap > 0 ? 'Every second counts toward your next minute.' : 'Nice reading!' }
 function readWeek(kid, ws = thisWeek()) { const sec = S.reading.filter(r => r.kid_id === kid.id && r.week_start === ws).reduce((a, r) => a + readSec(r, kid), 0); const minutes = Math.floor(sec / 60); return { sec, minutes, bonus: Math.min(minutes, Number(kid.reading_cap) || 0) } }
+/* Screen minutes are set a week (one amount for the whole week) or a day (the same amount every screen day;
+   what isn't used that day doesn't carry over). Reading, bonus minutes and the jar always count for the week:
+   with minutes a day, they're extra time on any screen day, used once that day's minutes run out. */
+const perDay = kid => !!kid && kid.screen_period === 'day';
+const scrWhen = kid => perDay(kid) ? 'today' : 'this week';
+const scrEvery = kid => perDay(kid) ? 'a day' : 'a week';
+function nextScreenDay(kid) {
+  const days = kid.screen_days || [6, 0], t = dow(today());
+  for (let i = 1; i <= 7; i++) { const d = (t + i) % 7; if (days.includes(d)) return i === 1 ? 'tomorrow' : DAYS[d] }
+  return 'Monday';
+}
+const scrNew = kid => perDay(kid) ? `More screen time comes ${nextScreenDay(kid)}.` : 'New screen time starts Monday.';
 function screenWeek(kid, ws = thisWeek()) {
   const base = Number(kid.base_screen_minutes) || 0, bonus = readWeek(kid, ws).bonus;
   const extra = S.sbonus.filter(a => a.kid_id === kid.id && a.week_start === ws).reduce((a, x) => a + Number(x.minutes), 0) + weekCredits(kid, ws).reduce((a, c) => a + (Number(c.minutes) || 0), 0);
   const sess = S.screen.filter(x => x.kid_id === kid.id && x.week_start === ws).sort((a, b) => ms(a.started_at) - ms(b.started_at));
   const pen = penMin(kid, ws);
-  const usedSec = sess.reduce((a, x) => a + liveSec(x), 0), totalSec = Math.max(0, (base + bonus + extra - pen) * 60), leftSec = Math.max(0, totalSec - usedSec);
   const active = sess.find(x => !x.ended_at && x.source !== 'manual');
-  return { base, bonus, extra, pen, sess, active, usedSec, totalSec, leftSec, left: Math.floor(leftSec / 60) };
+  const weekUsedSec = sess.reduce((a, x) => a + liveSec(x), 0);
+  if (!perDay(kid)) {
+    const totalSec = Math.max(0, (base + bonus + extra - pen) * 60), leftSec = Math.max(0, totalSec - weekUsedSec);
+    return { base, bonus, extra, pen, sess, active, usedSec: weekUsedSec, weekUsedSec, totalSec, leftSec, left: Math.floor(leftSec / 60) };
+  }
+  // Minutes a day: each screen day has its own minutes. Time used past a day's minutes comes out of the week's extra time.
+  const days = kid.screen_days || [6, 0], dayOK = d => days.includes(dow(d)) ? base * 60 : 0;
+  const byDay = {}; for (const x of sess) byDay[x.local_date] = (byDay[x.local_date] || 0) + liveSec(x);
+  const pool = (bonus + extra - pen) * 60;
+  if (ws !== thisWeek()) {
+    // a past week: every screen day's minutes, plus that week's extra time
+    let nDays = 0, spill = 0; for (let i = 0; i < 7; i++) if (days.includes(dow(addDays(ws, i)))) nDays++;
+    for (const [d, sec] of Object.entries(byDay)) spill += Math.max(0, sec - dayOK(d));
+    const totalSec = Math.max(0, nDays * base * 60 + pool), leftSec = Math.max(0, pool - spill);
+    return { base: nDays * base, dayBase: base, nDays, daily: true, bonus, extra, pen, sess, active, usedSec: weekUsedSec, weekUsedSec, totalSec, leftSec, left: Math.floor(leftSec / 60) };
+  }
+  const t = today(); let spillSec = 0;
+  for (const [d, sec] of Object.entries(byDay)) if (d < t) spillSec += Math.max(0, sec - dayOK(d));
+  const usedSec = byDay[t] || 0, todayBase = dayOK(t) / 60;
+  const totalSec = Math.max(0, todayBase * 60 + pool - spillSec), leftSec = Math.max(0, totalSec - usedSec);
+  return { base: todayBase, dayBase: base, daily: true, today: true, bonus, extra, pen, spillSec, sess, active, usedSec, weekUsedSec, totalSec, leftSec, left: Math.floor(leftSec / 60) };
 }
 const hms = sec => { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return h ? `${h}:${pad(m)}:${pad(x)}` : `${pad(m)}:${pad(x)}` };
 const dur = sec => { sec = Math.max(0, Math.floor(sec)); const m = Math.floor(sec / 60), x = sec % 60; return m && x ? `${m} min ${x} sec` : m ? `${m} min` : `${x} sec` };
 const isScreenDay = kid => (kid.screen_days || [6, 0]).includes(dow(today()));
+const onScreenDays = kid => { const d = kid.screen_days || [6, 0]; return d.length === 7 ? 'every day' : d.length === 5 && [1, 2, 3, 4, 5].every(x => d.includes(x)) ? 'on weekdays' : 'on ' + screenDayNames(kid) };
 const screenDayNames = kid => { const d = (kid.screen_days || [6, 0]).slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)); return d.map(x => DAYS[x]).join(' & ') || 'no days' };
 
 /* ---------- icons ---------- */
@@ -582,15 +614,15 @@ async function verifyCode() {
 
 /* ---------- onboarding: one friendly question per screen ---------- */
 const OB_STAGES = 4, obStage = s => ({ family: 0, pin: 1, jobs: 3 }[s] ?? 2);
-const ALLOW_PICKS = [0, 3, 5, 7, 10, 15], SCREEN_PICKS = [0, 60, 120, 180, 300];
+const ALLOW_PICKS = [0, 3, 5, 7, 10, 15], SCREEN_PICKS = [0, 60, 120, 180, 300], SCREEN_DAY_PICKS = [0, 30, 45, 60, 90, 120];
 const DAY_SETS = [['Weekends', [6, 0]], ['Fri to Sun', [5, 6, 0]], ['Every day', [1, 2, 3, 4, 5, 6, 0]]];
 const sameDays = (a, b) => a.length === b.length && a.every(d => b.includes(d));
 const daysLabel = d => d.length === 7 ? 'every day' : !d.length ? 'no screen days' : sameDays(d, [6, 0]) ? 'weekends' : sameDays(d, [1, 2, 3, 4, 5]) ? 'weekdays' : [1, 2, 3, 4, 5, 6, 0].filter(x => d.includes(x)).map(x => DOW[x]).join(', ');
-const kidSummary = k => `${Number(k.weekly_allowance) ? money(Number(k.weekly_allowance)) + ' a week' : 'No allowance'} · ${Number(k.base_screen_minutes) ? `${mins(Number(k.base_screen_minutes))} of screens, ${daysLabel(k.screen_days || [])}` : 'No screen time'}`;
+const kidSummary = k => `${Number(k.weekly_allowance) ? money(Number(k.weekly_allowance)) + ' a week' : 'No allowance'} · ${Number(k.base_screen_minutes) ? `${mins(Number(k.base_screen_minutes))} of screens ${scrEvery(k)}, ${daysLabel(k.screen_days || [])}` : 'No screen time'}`;
 function newKidDraft() {
   const O = S.onboard, last = O.kids[O.kids.length - 1], keys = Object.keys(COLORS);
   return { key: 'k' + Math.random().toString(36).slice(2, 10), name: '', color: keys.find(c => !O.kids.some(k => k.color === c)) || keys[O.kids.length % keys.length],
-    weekly_allowance: last ? last.weekly_allowance : 5, base_screen_minutes: last ? last.base_screen_minutes : 120, reading_cap: 60, screen_days: last ? [...last.screen_days] : [6, 0] };
+    weekly_allowance: last ? last.weekly_allowance : 5, base_screen_minutes: last ? last.base_screen_minutes : 120, screen_period: last ? last.screen_period || 'week' : 'week', reading_cap: 60, screen_days: last ? [...last.screen_days] : [6, 0] };
 }
 function onboardHTML() {
   const O = S.onboard, st = obStage(O.step), K = O.cur, nm = esc(K?.name || 'your kid'), n = O.kids.length;
@@ -610,8 +642,9 @@ function onboardHTML() {
     case 'allow': return ask(`How much allowance does ${nm} get each week?`, `It goes into ${nm}’s bank every Monday. Jobs earn extra.`,
       `<div class="field"><label class="label" for="obAmt">Each week</label><div class="moneyin"><span>$</span><input id="obAmt" class="inbig" type="number" inputmode="decimal" min="0" max="1000" step="0.5" value="${esc(K.weekly_allowance)}"></div></div>
       <div class="chips">${ALLOW_PICKS.map(v => chip('data-amt', v, Number(K.weekly_allowance) === v, v ? '$' + v : 'None')).join('')}</div>`);
-    case 'screen': return ask(`How much screen time does ${nm} get each week?`, `Reading earns more: every minute ${nm} reads adds a screen minute, up to 1 hr a week.`,
-      `<div class="chips">${SCREEN_PICKS.map(v => chip('data-smin', v, Number(K.base_screen_minutes) === v, v ? mins(v) : 'None')).join('')}</div>
+    case 'screen': return ask(`How much screen time does ${nm} get ${S.periodOK ? (perDay(K) ? 'each screen day' : 'each week') : 'each week'}?`, `Reading earns more: every minute ${nm} reads adds a screen minute, up to 1 hr a week.`,
+      `${S.periodOK ? `<div class="chips">${chip('data-oper', 'week', !perDay(K), 'A week')}${chip('data-oper', 'day', perDay(K), 'A day')}</div><p class="hint">${periodHint(K.screen_period)}</p>` : ''}
+      <div class="chips">${(perDay(K) ? SCREEN_DAY_PICKS : SCREEN_PICKS).map(v => chip('data-smin', v, Number(K.base_screen_minutes) === v, v ? mins(v) : 'None')).join('')}</div>
       <div class="field"><label class="label" for="obMin">Or type the minutes</label><input id="obMin" class="inbig" type="number" inputmode="numeric" min="0" max="2000" step="5" value="${esc(K.base_screen_minutes)}"></div>`);
     case 'days': return ask(`Which days are screen days for ${nm}?`, 'Screens only count on these days.',
       `<div class="chips">${DAY_SETS.map(([l, d]) => chip('data-dset', d.join(','), sameDays(K.screen_days, d), l)).join('')}</div>
@@ -664,6 +697,9 @@ function bindOnboard() {
   }
   each('[data-amt]', b => { K.weekly_allowance = Number(b.dataset.amt); $('obAmt').value = b.dataset.amt; press('data-amt', v => Number(v) === K.weekly_allowance) });
   if ($('obAmt')) $('obAmt').oninput = e => { K.weekly_allowance = e.target.value; press('data-amt', v => e.target.value !== '' && Number(v) === Number(e.target.value)) };
+  each('[data-oper]', b => { if ((b.dataset.oper === 'day') === perDay(K)) return; K.screen_period = b.dataset.oper;
+    K.base_screen_minutes = perDay(K) ? 60 : 120; // a sensible starting amount: an hour a day, or 2 hours a week
+    render() });
   each('[data-smin]', b => { K.base_screen_minutes = Number(b.dataset.smin); $('obMin').value = b.dataset.smin; press('data-smin', v => Number(v) === K.base_screen_minutes) });
   if ($('obMin')) $('obMin').oninput = e => { K.base_screen_minutes = e.target.value; press('data-smin', v => e.target.value !== '' && Number(v) === Number(e.target.value)) };
   const days = () => { press('data-oday', v => K.screen_days.includes(Number(v))); press('data-dset', v => sameDays(K.screen_days, v.split(',').map(Number))) };
@@ -712,8 +748,9 @@ async function addKid(body, opt = {}) {
 function kidFieldsHTML(K) {
   return `<div class="field"><label class="label" for="kN">First name</label><input id="kN" maxlength="40" autocomplete="off" autocapitalize="words" value="${esc(K.name)}"></div>
     <div class="field"><span class="label">Color</span>${swatchesHTML(K.color, 'data-ksw')}</div>
+    ${periodChips('data-kper', '', K.screen_period)}
     <div class="row2"><div class="field"><label class="label" for="kA">Weekly allowance ($)</label><input id="kA" type="number" inputmode="decimal" min="0" step="0.5" value="${esc(K.weekly_allowance)}"></div>
-    <div class="field"><label class="label" for="kS">Screen min / week</label><input id="kS" type="number" inputmode="numeric" min="0" step="5" value="${esc(K.base_screen_minutes)}"></div></div>
+    <div class="field"><label class="label" for="kS" data-perlabel="">${perDay(K) ? 'Screen min / day' : 'Screen min / week'}</label><input id="kS" type="number" inputmode="numeric" min="0" step="5" value="${esc(K.base_screen_minutes)}"></div></div>
     <div class="field"><span class="tiplabel"><label class="label" for="kR">Reading bonus limit</label><button class="tip" type="button" aria-label="What is the reading bonus limit?" aria-expanded="false">?</button></span><span class="tipbox" hidden>The most extra screen minutes reading can earn in one week. Every minute read adds a screen minute, up to this number.</span><input id="kR" type="number" inputmode="numeric" min="0" step="5" value="${esc(K.reading_cap)}"></div>
     <div class="field"><span class="label">Screen days</span><div class="chips daychips">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="chip" type="button" data-kd="${d}" aria-pressed="${K.screen_days.includes(d)}">${DOW[d]}</button>`).join('')}</div></div>`;
 }
@@ -722,10 +759,21 @@ function bindKidFields(root, K) {
   g('kN').oninput = e => { K.name = e.target.value }; g('kN').onblur = e => { e.target.value = K.name = capFirst(e.target.value) };
   g('kA').oninput = e => { K.weekly_allowance = e.target.value }; g('kS').oninput = e => { K.base_screen_minutes = e.target.value }; g('kR').oninput = e => { K.reading_cap = e.target.value };
   bindSwatches(root, 'data-ksw', c => { K.color = c });
+  root.querySelectorAll('[data-kper]').forEach(b => b.onclick = () => { const inp = g('kS'); K.screen_period = periodPick(root, 'data-kper', b, inp, K.screen_days.length); K.base_screen_minutes = inp.value });
   root.querySelectorAll('[data-kd]').forEach(b => b.onclick = () => { const d = Number(b.dataset.kd); K.screen_days = K.screen_days.includes(d) ? K.screen_days.filter(x => x !== d) : [...K.screen_days, d]; b.setAttribute('aria-pressed', K.screen_days.includes(d)) });
 }
 const kidBody = K => ({ name: capFirst(K.name), color: K.color, weekly_allowance: Math.min(1000, Math.max(0, r2(Number(K.weekly_allowance) || 0))),
-  base_screen_minutes: Math.min(2000, Math.max(0, parseInt(K.base_screen_minutes) || 0)), reading_cap: Math.min(2000, Math.max(0, parseInt(K.reading_cap) || 0)), screen_days: K.screen_days });
+  base_screen_minutes: Math.min(2000, Math.max(0, parseInt(K.base_screen_minutes) || 0)), reading_cap: Math.min(2000, Math.max(0, parseInt(K.reading_cap) || 0)), screen_days: K.screen_days, ...periodBody(K) });
+/* Tapping A week or A day: press it, and update that kid's minutes label and hint. Returns 'week' or 'day'. */
+function periodPick(root, attr, b, input, nDays) {
+  const v = b.getAttribute(attr), key = v.replace(/(week|day)$/, ''), per = v.endsWith('day') ? 'day' : 'week';
+  if (b.getAttribute('aria-pressed') === 'true') return per; // already picked
+  if (input && nDays > 0) { const n = parseInt(input.value) || 0; if (n) input.value = Math.min(2000, Math.max(5, Math.round((per === 'day' ? n / nDays : n * nDays) / 5) * 5)) }
+  root.querySelectorAll(`[${attr}]`).forEach(x => { if (x.getAttribute(attr).replace(/(week|day)$/, '') === key) x.setAttribute('aria-pressed', x === b) });
+  const lab = root.querySelector(`[data-perlabel="${key}"]`); if (lab) lab.textContent = attr === 'data-kper' ? (per === 'day' ? 'Screen min / day' : 'Screen min / week') : (per === 'day' ? 'Minutes a day' : 'Minutes a week');
+  const h = root.querySelector(`[data-perhint="${key}"]`); if (h) h.textContent = periodHint(per);
+  return per;
+}
 async function hashPin(fid, pin) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fid + ':' + pin));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -809,7 +857,7 @@ const bigMin = m => { m = Math.max(0, Math.floor(m)); const h = Math.floor(m / 6
 function kidHome(kid) {
   const st = stats(kid), sw = screenWeek(kid), rw = readWeek(kid), mine = pendingClaims(kid), G = kidGoals(kid);
   const ra = activeRead(kid), sa = sw.active, cap = Number(kid.reading_cap) || 0;
-  const scrSub = !isScreenDay(kid) ? `Opens ${screenDayNames(kid)}` : sw.leftSec ? `of ${mins(Math.round(sw.totalSec / 60))} this week` : 'All used this week';
+  const scrSub = !isScreenDay(kid) ? `Opens ${screenDayNames(kid)}` : sw.leftSec ? `of ${mins(Math.round(sw.totalSec / 60))} ${scrWhen(kid)}` : `All used ${scrWhen(kid)}`;
   const rdSub = cap ? (rw.bonus >= cap ? 'Bonus maxed! Read for fun' : `${rw.bonus} of ${cap} bonus min`) : 'this week';
   const recent = ledgerItems(kid, thisWeek()).slice(0, 4);
   return `<section class="hero bank">
@@ -1043,18 +1091,22 @@ const span = x => { const st = ms(x.started_at), en = x.ended_at ? ms(x.ended_at
 /* Screen time for a kid: one big "left" number, a bar, then where the minutes came from. */
 const mins = m => { m = Math.max(0, Math.round(m)); return m >= 60 ? `${Math.floor(m / 60)} hr${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min` };
 function eqHTML(kid, x, extra = '') {
-  const got = x.base + x.bonus + x.extra, usedPct = x.totalSec ? Math.min(100, 100 * x.usedSec / x.totalSec) : (x.usedSec ? 100 : 0);
+  const usedPct = x.totalSec ? Math.min(100, 100 * x.usedSec / x.totalSec) : (x.usedSec ? 100 : 0);
   const line = (ico, cls, what, v) => `<div class="st-row"><span class="ico ${cls}">${ico}</span><span class="st-what">${what}</span><b class="num">${v}</b></div>`;
+  const first = !x.daily ? line(I.clock, 'w', 'Every week you get', mins(x.base))
+    : x.today ? line(I.clock, 'w', isScreenDay(kid) ? 'Today you get' : 'Today isn’t a screen day', mins(x.base))
+    : line(I.clock, 'w', `${x.nDays} screen ${x.nDays === 1 ? 'day' : 'days'} × ${mins(x.dayBase)}`, mins(x.base));
   return `<section class="card stime">
-    <div class="st-head"><span class="ico s">${I.screen}</span><div><b class="st-left num" id="eqLeft">${hms(x.leftSec)}</b><span class="st-sub">screen time left this week</span></div></div>
+    <div class="st-head"><span class="ico s">${I.screen}</span><div><b class="st-left num" id="eqLeft">${hms(x.leftSec)}</b><span class="st-sub">screen time left ${x.today ? 'today' : 'this week'}</span></div></div>
     <div class="st-bar" aria-hidden="true"><i id="stBar" style="width:${usedPct}%"></i></div>
-    <p class="hint">Screens are open on ${screenDayNames(kid)}.</p>
+    <p class="hint">Screens are open ${onScreenDays(kid)}.${x.daily ? ` ${mins(x.dayBase)} a day. What isn’t used that day doesn’t carry over.` : ''}</p>
     <div class="st-list">
-      ${line(I.clock, 'w', 'Every week you get', mins(x.base))}
-      ${line(I.read, 'r', 'You earned by reading', '+' + mins(x.bonus))}
+      ${first}
+      ${line(I.read, 'r', x.daily ? 'You earned by reading this week' : 'You earned by reading', '+' + mins(x.bonus))}
       ${x.extra ? line(I.star, 'm', 'Bonus minutes', '+' + mins(x.extra)) : ''}
       ${x.pen ? line(I.jar, 'x', esc(penName()), '−' + mins(x.pen)) : ''}
-      <div class="st-row st-used"><span class="ico s">${I.screen}</span><span class="st-what">You've watched</span><b class="num" id="eqUsed">${mins(Math.floor(x.usedSec / 60))}</b></div>
+      ${x.spillSec >= 60 ? line(I.screen, 's', 'Extra time used on other days', '−' + mins(Math.floor(x.spillSec / 60))) : ''}
+      <div class="st-row st-used"><span class="ico s">${I.screen}</span><span class="st-what">${x.today ? 'You’ve watched today' : 'You’ve watched'}</span><b class="num" id="eqUsed">${mins(Math.floor(x.usedSec / 60))}</b></div>
     </div>${extra}</section>`;
 }
 function boardHTML(kid) {
@@ -1062,11 +1114,11 @@ function boardHTML(kid) {
   if (a) { const run = !!a.running_since, tg = sessTarget(a);
     if (tg) return `<div class="bline"><span class="label">${run ? `${I.bell}Timer · ${minLabel(Math.round(tg / 60))}` : 'Paused'}</span><b>${esc(a.note || 'Screens')}</b></div>
       <div class="digits num ${run ? '' : 'idle'}" id="digits">${hms(tg - liveSec(a))}</div><div class="bar"><i id="barfill" style="width:${Math.min(100, 100 * liveSec(a) / tg)}%"></i></div>
-      <p class="note">${run ? 'It rings when the timer is done.' : 'Timer is paused, so screens are off. Tap Resume to keep going.'} <b id="wkLeft">${hms(x.leftSec)}</b> left this week.</p>
+      <p class="note">${run ? 'It rings when the timer is done.' : 'Timer is paused, so screens are off. Tap Resume to keep going.'} <b id="wkLeft">${hms(x.leftSec)}</b> left ${scrWhen(kid)}.</p>
       <div class="row2">${run ? '<button class="ghost" id="pauseScr" type="button">Pause</button>' : '<button class="go" id="resumeScr" type="button">Resume</button>'}<button class="ghost" id="doneScr" type="button">I'm done</button></div>`;
     return `<div class="bline"><span class="label">${run ? 'Watching now' : 'Paused'}</span><b>${esc(a.note || 'Screens')}</b></div>
       <div class="digits num ${run ? '' : 'idle'}" id="digits">${hms(x.leftSec)}</div><div class="bar"><i id="barfill" style="width:${x.totalSec ? 100 * x.usedSec / x.totalSec : 100}%"></i></div>
-      <p class="note">This session <b id="sessUsed">${hms(liveSec(a))}</b>. ${run ? 'That big number is what’s left this week. Pause whenever you stop. At zero, screens go off.' : 'Clock is paused, so screens are off. Tap Resume to keep going.'}</p>
+      <p class="note">This session <b id="sessUsed">${hms(liveSec(a))}</b>. ${run ? 'That big number is what’s left ${scrWhen(kid)}. Pause whenever you stop. At zero, screens go off.' : 'Clock is paused, so screens are off. Tap Resume to keep going.'}</p>
       <div class="row2">${run ? '<button class="ghost" id="pauseScr" type="button">Pause</button>' : '<button class="go" id="resumeScr" type="button">Resume</button>'}<button class="ghost" id="doneScr" type="button">I'm done</button></div>`; }
   if (!isScreenDay(kid)) return `<div class="bline"><span class="label">Screen clock</span><span>Opens <b>${screenDayNames(kid)}</b></span></div>
     <div class="digits idle num">${hms(x.leftSec)}</div><p class="note">That's your time so far. Reading this week adds more.</p>`;
@@ -1096,7 +1148,7 @@ function pKids() {
       <div class="owedline">${o.last ? `Last withdrawal ${short(o.last)} (${ago(o.days)})` : 'No withdrawals yet'}</div>
       <button class="saveline" type="button" data-savings="${k.id}"><span>${G.length ? `<b>${money(st.saved)}</b> saved in ${G.length} goal${G.length > 1 ? 's' : ''}${ready.length ? ` · <span class="rdy">${ready.length > 1 ? `${ready.length} ready to buy` : `${esc(goalLabel(ready[0]))} is ready to buy`}</span>` : ''}` : 'No savings goals yet'}</span>${I.chev}</button>
       <div class="kstats"><div><b class="num">${money(st.week)}</b><span>This week</span></div><div><b class="num">${money(st.month)}</b><span>Month</span></div><div><b class="num">${money(st.lifetime)}</b><span>Lifetime</span></div></div>
-      <div class="kstats"><div><b class="num">${hms(sw.leftSec)}</b><span>Screen left</span></div><div><b class="num" style="color:var(--read)">+${rw.bonus}</b><span>Reading bonus</span></div><div><b class="num">${hms(rw.sec)}</b><span>Read</span></div></div>
+      <div class="kstats"><div><b class="num">${hms(sw.leftSec)}</b><span>${perDay(k) ? 'Screen left today' : 'Screen left'}</span></div><div><b class="num" style="color:var(--read)">+${rw.bonus}</b><span>Reading bonus</span></div><div><b class="num">${hms(rw.sec)}</b><span>Read</span></div></div>
       <div class="kact"><button class="pill" type="button" data-logjob="${k.id}">Log a job</button><button class="pill ok" type="button" data-bonus="${k.id}">Add bonus</button><button class="pill soft" type="button" data-purchase="${k.id}">Bought something</button>${penOn() ? `<button class="pill soft jarpill" type="button" data-pen="${k.id}">${I.jar}${esc(penName())}</button>` : ''}<button class="pill soft" type="button" data-more="${k.id}">More</button></div></article>`;
   }).join('') + `<button class="pill soft" id="addKidBtn" type="button" style="justify-self:start">+ Add a kid</button><div class="foot ptail">${supportHTML()}</div>`;
 }
@@ -1304,11 +1356,12 @@ function openEdit(spec) {
 }
 function pSettings() {
   const F = S.family;
-  return `<section class="sect"><div class="sect-h"><h3>Kids</h3></div><div class="list">${S.kids.map(k => `<button class="row" type="button" data-editkid="${k.id}">${avatar(k)}<span class="t"><b>${esc(k.name)}</b><span>${money(Number(k.weekly_allowance))} a week · ${k.base_screen_minutes} screen min · reading up to +${k.reading_cap}</span></span></button>`).join('')}</div>
+  return `<section class="sect"><div class="sect-h"><h3>Kids</h3></div><div class="list">${S.kids.map(k => `<button class="row" type="button" data-editkid="${k.id}">${avatar(k)}<span class="t"><b>${esc(k.name)}</b><span>${money(Number(k.weekly_allowance))} a week · ${mins(Number(k.base_screen_minutes))} of screens ${scrEvery(k)} · reading up to +${k.reading_cap}</span></span></button>`).join('')}</div>
     <button class="pill soft" id="addKidBtn" type="button" style="justify-self:start">+ Add a kid</button></section>
     ${S.kids.length ? `<section class="sect"><div class="sect-h"><h3>Screen time</h3></div>${S.kids.map(k => `<div class="card scrset">
       <div class="kidform-h">${avatar(k)}<b>${esc(k.name)}</b></div>
-      <div class="row2"><div class="field"><label class="label" for="sb-${k.id}">Base minutes / week</label><input id="sb-${k.id}" type="number" inputmode="numeric" min="0" step="5" value="${k.base_screen_minutes}"></div>
+      ${periodChips('data-sper', k.id + '|', k.screen_period)}
+      <div class="row2"><div class="field"><label class="label" for="sb-${k.id}" data-perlabel="${k.id}|">${perDay(k) ? 'Minutes a day' : 'Minutes a week'}</label><input id="sb-${k.id}" type="number" inputmode="numeric" min="0" step="5" value="${k.base_screen_minutes}"></div>
       <div class="field"><span class="tiplabel"><label class="label" for="sr-${k.id}">Reading bonus limit</label><button class="tip" type="button" aria-label="What is the reading bonus limit?" aria-expanded="false">?</button></span><span class="tipbox" hidden>The most extra screen minutes reading can earn in one week. Every minute read adds a screen minute, up to this number.</span><input id="sr-${k.id}" type="number" inputmode="numeric" min="0" step="5" value="${k.reading_cap}"></div></div>
       <div class="field"><span class="label">Screen days</span><div class="chips daychips">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="chip" type="button" data-sday="${k.id}|${d}" aria-pressed="${(k.screen_days || []).includes(d)}">${DOW[d]}</button>`).join('')}</div></div>
       <button class="pill" type="button" data-savescr="${k.id}" style="justify-self:start">Save ${esc(k.name)}'s screen time</button></div>`).join('')}</section>` : ''}
@@ -1427,9 +1480,11 @@ function bindAll() {
   on('signOut', async () => { await sb.auth.signOut(); store.set('profile', null); location.reload() });
   on('delAcct', deleteSheet);
   each('[data-sday]', el => el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') !== 'true'));
+  each('[data-sper]', el => { const id = el.dataset.sper.split('|')[0]; periodPick(app, 'data-sper', el, $('sb-' + id), app.querySelectorAll(`[data-sday^="${id}|"][aria-pressed="true"]`).length) });
   each('[data-savescr]', el => { const id = el.dataset.savescr, days = [...app.querySelectorAll(`[data-sday^="${id}|"]`)].filter(b => b.getAttribute('aria-pressed') === 'true').map(b => Number(b.dataset.sday.split('|')[1]));
     if (!days.length) return toast('Pick at least one screen day.');
-    act(() => q(sb.from('kids').update({ base_screen_minutes: Math.max(0, parseInt($('sb-' + id).value) || 0), reading_cap: Math.max(0, parseInt($('sr-' + id).value) || 0), screen_days: days }).eq('id', id)), 'Screen time saved') });
+    const per = app.querySelector(`[data-sper="${id}|day"]`)?.getAttribute('aria-pressed') === 'true' ? 'day' : 'week';
+    act(() => q(sb.from('kids').update({ base_screen_minutes: Math.min(2000, Math.max(0, parseInt($('sb-' + id).value) || 0)), reading_cap: Math.max(0, parseInt($('sr-' + id).value) || 0), screen_days: days, ...periodBody({ screen_period: per }) }).eq('id', id)), 'Screen time saved') });
   each('[data-fb]', el => feedbackSheet(el.dataset.fb));
   each('[data-privacy]', () => privacySheet());
 }
@@ -1469,12 +1524,12 @@ function timerPickHTML(kind, st, maxMin) {
     ${st.mode === 'timer' ? `<div class="chips tmins ${ch.length > 12 ? 'scroll' : ''}" role="radiogroup" aria-label="Minutes">${ch.map(m => `<button class="chip" type="button" role="radio" data-tmin="${m}" aria-checked="${m === st.min}" aria-pressed="${m === st.min}">${kind === 'screen' && m === maxMin ? `All ${minLabel(m)}` : minLabel(m)}</button>`).join('')}</div>
       <div class="tcustom"><label for="tminIn">Or type the minutes</label><span class="minin"><input id="tminIn" type="number" inputmode="numeric" min="1" max="${maxMin}" step="1" value="${st.min}" data-kind="${kind}"><span>min</span></span></div>
       <p class="hint" id="tHint">${timerHint(kind, st.min)}</p>${alertLineHTML()}`
-      : `<p class="hint">${kind === 'screen' ? 'Runs until you stop it. At zero for the week, screens go off.' : 'Counts up until you tap I’m done.'}</p>`}</div>`;
+      : `<p class="hint">${kind === 'screen' ? 'Runs until you stop it. At zero, screens go off.' : 'Counts up until you tap I’m done.'}</p>`}</div>`;
 }
 /* Pick a valid starting choice: the last one used, or the closest that still fits. */
 function timerState(kind, kid, maxMin) {
   const p = timerPref(kind, kid), ch = timerChoices(kind, maxMin);
-  // A typed amount is kept too, as long as it still fits (screens can't go past what's left this week).
+  // A typed amount is kept too, as long as it still fits (screens can't go past what's left).
   const min = p.min >= 1 && p.min <= maxMin ? Math.round(p.min) : ch.filter(m => m <= p.min).pop() || ch[0];
   return { mode: p.mode, min };
 }
@@ -1489,7 +1544,7 @@ function bindTimerPick(st, redraw) {
   const max = Number(inp.max), kind = inp.dataset.kind;
   const sync = note => { layer.querySelectorAll('[data-tmin]').forEach(b => { const on = Number(b.dataset.tmin) === st.min; b.setAttribute('aria-checked', on); b.setAttribute('aria-pressed', on) });
     const h = $('tHint'); if (h) h.textContent = note || timerHint(kind, st.min); const go = layer.querySelector('#scrGo,#rdGo'); if (go) go.textContent = `Start ${minLabel(st.min)} timer` };
-  const over = () => kind === 'screen' ? `You have ${minLabel(max)} left this week, so the timer is set to ${minLabel(max)}.` : `Reading timers go up to ${minLabel(max)}.`;
+  const over = () => kind === 'screen' ? `You have ${minLabel(max)} left, so the timer is set to ${minLabel(max)}.` : `Reading timers go up to ${minLabel(max)}.`;
   inp.oninput = () => { const v = parseInt(inp.value); if (v >= 1) { st.min = Math.min(max, v); sync(v > max ? over() : '') } };
   inp.onchange = () => { const v = parseInt(inp.value); st.min = Math.min(max, Math.max(1, v || st.min)); inp.value = st.min; sync(v > max ? over() : '') };
   inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur() } };
@@ -1512,11 +1567,11 @@ async function startScreen(kid, note, target) {
 function screenStartSheet(kid) {
   const sw = screenWeek(kid);
   if (!isScreenDay(kid)) return toast(`Screens open ${screenDayNames(kid)}. You have ${dur(sw.leftSec) || '0 min'} so far.`);
-  if (!sw.leftSec) return toast('All of this week’s screen time is used. New time starts Monday.');
+  if (!sw.leftSec) return toast(`All of ${perDay(kid) ? 'today’s' : 'this week’s'} screen time is used. ${scrNew(kid)}`);
   const recent = [...new Set(S.screen.filter(x => x.kid_id === kid.id && x.note && x.source !== 'manual').sort((a, b) => ms(b.started_at) - ms(a.started_at)).map(x => x.note))].slice(0, 6);
   const maxMin = Math.max(1, Math.floor(sw.leftSec / 60)), st = timerState('screen', kid, maxMin);
   let note = recent[0] || '';
-  const draw = () => openSheet(`<span class="label">${dur(sw.leftSec)} left this week</span><h2>Start screens</h2><div class="field"><label class="label" for="watchIn">What are you watching or playing?</label><input id="watchIn" maxlength="80" placeholder="Show, game or app" value="${esc(note)}">
+  const draw = () => openSheet(`<span class="label">${dur(sw.leftSec)} left ${scrWhen(kid)}</span><h2>Start screens</h2><div class="field"><label class="label" for="watchIn">What are you watching or playing?</label><input id="watchIn" maxlength="80" placeholder="Show, game or app" value="${esc(note)}">
     ${recent.length ? `<div class="chips">${recent.map(b => `<button class="chip" type="button" data-watch="${esc(b)}">${esc(b)}</button>`).join('')}</div>` : ''}</div>
     ${timerPickHTML('screen', st, maxMin)}
     <button class="save" id="scrGo" type="button">${st.mode === 'timer' ? `Start ${minLabel(st.min)} timer` : 'Start the clock'}</button><button class="cancel" data-close type="button">Cancel</button>`, () => {
@@ -1601,13 +1656,13 @@ setInterval(() => {
   const tg = sessTarget(a);
   if (a && a.running_since && tg && liveSec(a) >= tg && x.leftSec > 0 && !autoStopping) {
     autoStopping = true; const quiet = pushOn() && rawSec(a) - tg > 10;
-    doneTimer('screen_sessions', a, null, null, tg).then(() => ringAlarm('Time\u2019s up!', `Your ${minLabel(Math.round(tg / 60))} of screens are done. ${screenWeek(kid).leftSec ? `${dur(screenWeek(kid).leftSec)} left this week.` : 'That was the last of this week\u2019s screen time.'}`,
-      () => celebrate('Screens off. Nice job!', screenWeek(kid).leftSec ? `You still have ${dur(screenWeek(kid).leftSec)} saved for later.` : 'New screen time starts Monday.', { power: .6, icon: 'check' }), { quiet })).finally(() => { autoStopping = false });
+    doneTimer('screen_sessions', a, null, null, tg).then(() => ringAlarm('Time\u2019s up!', `Your ${minLabel(Math.round(tg / 60))} of screens are done. ${screenWeek(kid).leftSec ? `${dur(screenWeek(kid).leftSec)} left ${scrWhen(kid)}.` : `That was the last of ${perDay(kid) ? 'today\u2019s' : 'this week\u2019s'} screen time.`}`,
+      () => celebrate('Screens off. Nice job!', screenWeek(kid).leftSec ? `You still have ${dur(screenWeek(kid).leftSec)} saved for later.` : scrNew(kid), { power: .6, icon: 'check' }), { quiet })).finally(() => { autoStopping = false });
     return;
   }
   if (a && a.running_since && x.leftSec <= 0 && !autoStopping) {
     autoStopping = true;
-    doneTimer('screen_sessions', a, null, null, Math.max(0, liveSec(a) - (x.usedSec - x.totalSec))).then(() => ringAlarm('Time\u2019s up!', 'That was the last of this week\u2019s screen time. New time starts Monday.')).finally(() => { autoStopping = false });
+    doneTimer('screen_sessions', a, null, null, Math.max(0, liveSec(a) - (x.usedSec - x.totalSec))).then(() => ringAlarm('Time\u2019s up!', `That was the last of ${perDay(kid) ? 'today\u2019s' : 'this week\u2019s'} screen time. ${scrNew(kid)}`)).finally(() => { autoStopping = false });
     return;
   }
   if (a && a.running_since) { const d = $('digits'); if (d) d.textContent = hms(tg ? tg - liveSec(a) : x.leftSec); const wl = $('wkLeft'); if (wl) wl.textContent = hms(x.leftSec); const su = $('sessUsed'); if (su) su.textContent = hms(liveSec(a)); const f = $('barfill'); if (f) f.style.width = (tg ? Math.min(100, 100 * liveSec(a) / tg) : x.totalSec ? 100 * x.usedSec / x.totalSec : 100) + '%'; const el = $('eqLeft'); if (el) el.textContent = hms(x.leftSec); const eu = $('eqUsed'); if (eu) eu.textContent = mins(Math.floor(x.usedSec / 60)); const sb2 = $('stBar'); if (sb2) sb2.style.width = (x.totalSec ? Math.min(100, 100 * x.usedSec / x.totalSec) : 100) + '%' }
@@ -1758,7 +1813,7 @@ function rulesSheet(kid) {
     ['pay', 'p', `<b>Your money stays in your bank</b> until you spend it or take it out.`],
     ['heart', 'j', `<b>Save up for things.</b> Move money into a goal and it's kept for that goal.${savLocked() ? ' A grown-up moves it back out.' : ''}`],
     penOn() ? ['jar', 'x', `<b>The ${esc(penName())}</b> can take a little, always with a reason.`] : ['star', 'm', `<b>Money is never taken away.</b>`],
-    days && base && ['screen', 's', `<b>${mins(base)} of screens a week,</b> on ${screenDayNames(kid)}.`],
+    days && base && ['screen', 's', perDay(kid) ? `<b>${mins(base)} of screens a day,</b> ${onScreenDays(kid)}. What you don’t use that day doesn’t carry over.` : `<b>${mins(base)} of screens a week,</b> ${onScreenDays(kid)}.`],
     days && cap && ['read', 'r', `<b>Every minute you read</b> earns a screen minute, up to ${mins(cap)} a week.`],
     days && (base || cap) && ['clock', 's', `<b>Screens count only while the clock runs.</b>`],
   ].filter(Boolean);
@@ -1833,7 +1888,7 @@ function penaltySheet(kid, row) {
     openSheet(`<span class="label">${esc(kid.name)} · ${money(stats(kid).bank)} in the bank · ${dur(screenWeek(kid, ws).leftSec)} screens left</span><h2>${row ? 'Edit' : 'Add to the'} ${esc(penName())}${row ? ' entry' : ''}</h2>
       <div class="seg" style="grid-template-columns:1fr 1fr"><button type="button" data-pm="money" aria-pressed="${mode === 'money'}">Money</button><button type="button" data-pm="minutes" aria-pressed="${mode === 'minutes'}">Screen minutes</button></div>
       <p class="hint">Keep it small: ${mode === 'money' ? '10¢ to 25¢' : '1 to 5 minutes'} is usually plenty.</p>
-      ${max > 0 ? `<div class="chips">${presets.map(v => `<button class="chip" type="button" data-pa="${v}" aria-pressed="${!all && Number(st.amt) === v}">${mode === 'money' ? (v < 1 ? Math.round(v * 100) + '¢' : '$' + v) : v + ' min'}</button>`).join('')}</div>` : `<p class="hint">${esc(kid.name)} has no ${mode === 'money' ? 'money in the bank' : 'screen minutes left this week'} to take.</p>`}
+      ${max > 0 ? `<div class="chips">${presets.map(v => `<button class="chip" type="button" data-pa="${v}" aria-pressed="${!all && Number(st.amt) === v}">${mode === 'money' ? (v < 1 ? Math.round(v * 100) + '¢' : '$' + v) : v + ' min'}</button>`).join('')}</div>` : `<p class="hint">${esc(kid.name)} has no ${mode === 'money' ? 'money in the bank' : `screen minutes left ${scrWhen(kid)}`} to take.</p>`}
       <div class="field"><label class="label" for="pAmt">${mode === 'money' ? 'Amount ($)' : 'Minutes'}</label><input id="pAmt" type="number" inputmode="${mode === 'money' ? 'decimal' : 'numeric'}" min="${mode === 'money' ? '0.01' : '1'}" step="${mode === 'money' ? '0.05' : '1'}" max="${max}" value="${mode === 'money' ? Number(st.amt || 0).toFixed(2) : st.amt || ''}"></div>
       ${max > 0 ? (all ? `<p class="warnline">That's everything: ${fmt(mode, max)}. Most of the time a little goes a long way.</p>` : `<button class="link quiet" id="pAll" type="button">Take all of it (${fmt(mode, max)})</button>`) : ''}
       <div class="field"><label class="label" for="pWhy">Why? ${esc(kid.name)} will see this</label><input id="pWhy" maxlength="120" placeholder="What happened" value="${esc(st.why)}"></div>
@@ -2080,8 +2135,16 @@ setInterval(tourTick, 250);
 addEventListener('keydown', e => { if (e.key === 'Escape' && tourEl?.classList.contains('on')) tourEnd() });
 
 /* ---------- boot ---------- */
+/* The a week / a day choice needs the screen_period column (supabase/schema.sql). Until it's there, the choice is hidden
+   and every kid counts screen minutes a week, like before. */
+async function probePeriod() { if (S.periodOK !== undefined) return; try { const { error } = await sb.from('kids').select('screen_period').limit(1); S.periodOK = !error } catch (e) { S.periodOK = false } }
+const periodBody = K => S.periodOK ? { screen_period: K.screen_period === 'day' ? 'day' : 'week' } : {};
+/* "Screen minutes are: A week | A day" */
+const periodChips = (attr, key, cur) => S.periodOK ? `<div class="field"><span class="label">Screen minutes are</span><div class="chips">${[['week', 'A week'], ['day', 'A day']].map(([v, l]) => `<button class="chip" type="button" ${attr}="${key}${v}" aria-pressed="${(cur === 'day' ? 'day' : 'week') === v}">${l}</button>`).join('')}</div><p class="hint" data-perhint="${key}">${periodHint(cur)}</p></div>` : '';
+const periodHint = cur => cur === 'day' ? 'The same minutes every screen day. What isn’t used that day doesn’t carry over. Reading and bonus minutes are extra, on any screen day that week.' : 'One amount for the whole week, used on any screen day.';
 async function enter(session) {
   S.user = session.user;
+  await probePeriod();
   try {
     let fid = (await q(sb.from('family_members').select('family_id').eq('user_id', S.user.id).limit(1)))[0]?.family_id;
     if (!fid) fid = await q(sb.rpc('accept_invites'));

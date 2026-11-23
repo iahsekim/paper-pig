@@ -166,7 +166,7 @@ function build({ email, setup }) {
     ${para('Do the same on your kid’s tablet or phone. Kids use your sign-in and pick their own name. Your parent tools stay behind your 4-digit PIN.')}
 
     <h2 style="${H2}">${NUM(2)}Set it up${setup ? ' (you already did this part)' : ' (about 5 minutes)'}</h2>
-    ${para('Sign in with your email. There is no password: you get a code. Then it asks one question per screen: your family name, a parent PIN, and for each kid their name, weekly allowance, screen minutes a week and screen days. Last, a starter job list with prices. Keep, change or delete any of them.')}
+    ${para('Sign in with your email. There is no password: you get a code. Then it asks one question per screen: your family name, a parent PIN, and for each kid their name, weekly allowance, screen minutes (a week or a day) and screen days. Last, a starter job list with prices. Keep, change or delete any of them.')}
 
     <h2 style="${H2}">${NUM(3)}How a week works</h2>
     ${UL([
@@ -223,7 +223,7 @@ Android:
 Do the same on your kid's tablet or phone. Kids use your sign-in and pick their own name. Your parent tools stay behind your 4-digit PIN.
 
 2. SET IT UP${setup ? ' (you already did this part)' : ' (about 5 minutes)'}
-Sign in with your email. There is no password: you get a code. Then it asks one question per screen: your family name, a parent PIN, and for each kid their name, weekly allowance, screen minutes a week and screen days. Last, a starter job list with prices. Keep, change or delete any of them.
+Sign in with your email. There is no password: you get a code. Then it asks one question per screen: your family name, a parent PIN, and for each kid their name, weekly allowance, screen minutes (a week or a day) and screen days. Last, a starter job list with prices. Keep, change or delete any of them.
 
 3. HOW A WEEK WORKS
 - Allowance. Every Monday, each kid's allowance goes into their bank.

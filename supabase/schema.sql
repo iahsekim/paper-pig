@@ -40,6 +40,7 @@ create table if not exists public.kids (
   reading_cap         int not null default 60 check (reading_cap between 0 and 2000),
   max_read_session    int not null default 60 check (max_read_session between 5 and 240),
   screen_days         int[] not null default '{6,0}',
+  screen_period       text not null default 'week' check (screen_period in ('week', 'day')),
   start_week          date not null,
   goal_name           text check (char_length(goal_name) <= 60),
   goal_amount         numeric(8,2) check (goal_amount > 0 and goal_amount <= 100000),
@@ -209,6 +210,8 @@ create table if not exists public.savings_moves (
 alter table public.transactions add column if not exists goal_id uuid references public.savings_goals on delete set null;
 -- When on, kids can put money into goals and move it between goals, but only a parent/guardian can move it back to the bank.
 alter table public.families add column if not exists savings_locked boolean not null default false;
+-- Screen minutes a week (one amount for the week) or a day (the same amount every screen day; unused minutes don't carry over).
+alter table public.kids add column if not exists screen_period text not null default 'week' check (screen_period in ('week', 'day'));
 create index if not exists goals_kid on public.savings_goals (kid_id);
 create index if not exists moves_kid on public.savings_moves (kid_id);
 
